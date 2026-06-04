@@ -74,3 +74,51 @@ In response to a transmission of a PRACH and a PUSCH, or to a transmission of on
   2.  特权动作（隐藏彩蛋）：手机如果只发了 PRACH（暗号），但它挑的这个暗号，在基站的排班表里是强制绑定了某个有效数据车道（PUSCH occasion）的，系统也会认为你走的是极速通道，同样允许你去蹲守。
 监听目标：手机死死盯住大屏幕，寻找带着自己 MsgB-RNTI 防伪印章的 DCI format 1_0 控制小纸条。
 
+⏱️ 第二关：蹲守从哪一秒开始算？（窗口起点）
+"The window starts at the first symbol of the earliest CORESET... that is at least one symbol, after the last symbol of the PUSCH occasion corresponding to the PRACH transmission..."
+这段话规定了“开门营业时间（起点）”。它设计得非常鸡贼，绝不让手机白等：
+  痛点：手机刚发完数据，基站接收和处理是需要时间的，如果你马上就开始等回信，纯属浪费电。
+  起跑线法则：协议规定，手机发完 MsgA 的数据部分（PUSCH occasion 的最后一个符号）之后，至少要先歇一口气（休息 1 个符号的时间）。
+  寻找大屏幕：休息完这一口气之后，手机开始东张西望，去找离当前时间最近的那块“官方大屏幕”（Type1-PDCCH CSS 的最早的 CORESET）。
+  正式起跑：这块最早的大屏幕亮起的第一秒（first symbol），就是 MsgB 监听窗口正式打开的起点！
+
+🛰️ 第三关：卫星/远距离补丁（时空延时补偿）
+"If 𝑁TA,adjUE or 𝑁TA,adjcommon... is not zero, the window starts after an additional 𝑇TA+𝑘mac msec..."
+这是一个极其硬核的“时延补丁”，专门针对**非地面网络（比如卫星通信 NTN）**或超大覆盖基站设计的：
+  痛点：如果在普通城市里，基站离你几百米，光速传输几乎没有延迟。但如果是连卫星（或者基站覆盖半径几十公里），信号飞上天再飞回来，路上会耽误好几毫秒。如果你按普通城市的标准去掐表，等你开始蹲守时，回信可能还在太空中飘着呢！
+  补偿机制：协议规定，如果网络配置了 TA（时间提前量） 或特定补偿值不为零，说明现在是在“异地恋/异星恋”。那么，监听窗口的起点，必须在刚才的基础上，再往后强制推延一段时间：推延的时间等于 电磁波跑路的时间差 (T_TA) 加上 系统微调时间 (k_mac)。
+  现实意义：等包裹飞到家门口了再开门，坚决不浪费手机一丝一毫的电量去空等。
+
+📏 第四关：门开多久会关？（窗口长度）
+"The length of the window in number of slots, based on the SCS for Type1-PDCCH CSS set, is provided by msgB-ResponseWindow."
+  关门法则：窗口的长度不是无限的。基站会提前在广播里告诉你一个参数：msgB-ResponseWindow。比如它配置了 10，就意味着这个窗口会持续 10 个时隙（slot）。
+  刻度标准：这 10 个时隙有多长？它是按照那块“官方大屏幕（Type1-PDCCH CSS）”所在频段的子载波间隔（SCS）来计算的。车道（SCS）越宽，每个时隙就越短，关门就越快。超过这个长度没听到自己的 MsgB-RNTI，直接判定翻车。
+
+🔄 Type-2 MsgB 监听窗口流水线
+我们用时序图看看这段极其严密的“掐表等信”流程：
+
+ 时间轴向前推进 ──►
+ 
+ [发送 MsgA 结束]
+ 也就是 PUSCH occasion 最后一刻
+        │
+        ├─► 1. 喘口气 (强制等待至少 1 个符号)
+        │
+        ├─► 2. 远距离修正？(如果配置了 TA 补偿，强制再等一段 T_TA + k_mac 时间)
+        │      (普通城市无视这步，连卫星必须等)
+        │
+        ▼ 
+ 【寻找最近的营业点】找到最近的 Type1 CSS 大屏幕
+        │
+  ==== 窗口正式开启！开始监听 MsgB-RNTI (DCI 1_0) ====
+        │
+        │ 
+        │◄── 这里是漫长的等待，长度由 msgB-ResponseWindow 决定 ──►│
+        │    (比如等了 10 个 slot)                                │
+        │
+  ==== 窗口无情关闭！ ==================================================
+        │
+        ▼ (如果在关门前没监听到，宣告 Type-2 接入失败)
+
+💡 总结
+这段协议精确定义了 5G 极速接入（Type-2）中“拆盲盒”的倒计时规则：手机在发完 MsgA 的数据后，不能傻等，必须先“强制歇一口气（至少1个符号）”，如果是在卫星等远距离通信下，还要加上“电磁波跑路的时间补偿”。等这些物理延迟过去后，手机会踩准下一个最早亮起的“官方大屏幕（Type1 CSS）”，正式开启由 msgB-ResponseWindow 决定寿命的监听窗口，死死盯住带有专属印章（MsgB-RNTI）的控制指令。
