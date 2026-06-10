@@ -1,6 +1,5 @@
----
-# 🔖 章节：10 UE procedure for receiving control information 
-*(终端接收控制信息的流程)*
+# 🔖 章节：10 UE procedure for receiving control information *(终端接收控制信息的流程)*
+
 ---
 
 ## 📖 章节导读：5G 调度的“中枢神经”与“盲检游戏”
@@ -633,4 +632,1421 @@
 ### 💡 章节硬核总结
 
 **本段协议在数学逻辑上与前述的 Span (X,Y) 选择机制互为镜像，但其作用域专门限定在了 FR2-2 ($\mu=6$) 的极高频组时隙 $(X_s, Y_s)$ 场景中。这是因为 3GPP 协议体系的严谨性要求消除任何潜在的 L1 参数多解性（Ambiguity）。当搜索空间的时域稀疏度超过了多个终端能力的下限时，系统自动执行“Max-Capacity Fallback”策略。通过显式地将终端绑定到预算最大的合法 $(X_s, Y_s)$ 状态上，协议确保了基站在较宽松的调度周期内，能够向 UE 下发尽可能多的 PDCCH candidates（例如聚合更多的分量载波或配置更多的 Fallback DCI），从而在不击穿终端瞬时算力的前提下，最大化系统下行调度的稳健性与吞吐潜力。**
+
+## 📖 协议原文拆解 (十三)：到底什么是“看黑板的能力”？(盲检能力的统一定义)
+
+> **协议原文**
+> A UE capability for PDCCH monitoring per slot, or per group of $X_s$ slots according to combination ($X_s$,$Y_s$), or per span on an active DL BWP of a serving cell is defined by a maximum number of PDCCH candidates and non-overlapped CCEs the UE can monitor per slot, or per group of $X_s$ slots according to combination ($X_s$,$Y_s$), or per span, respectively, on the active DL BWP of the serving cell.
+
+### 📚 增量术语表
+* **UE capability for PDCCH monitoring**：PDCCH 盲检能力。**一句话解释**：手机处理下行控制信令的“算力体检指标”。
+* **CCE (Control Channel Element)**：控制信道元素。**一句话解释**：组成 PDCCH 通知单的基本“积木块”。基带芯片需要消耗内存和算力去对这些积木块进行信道估计（Channel Estimation）。
+
+### 🚪 第一关：统一度量衡（万变不离其宗）
+在前面的拆解中，我们看到了协议为了适应不同的业务（eMBB、URLLC、RedCap），发明了三种截然不同的时间结算周期：
+1. **Per slot**（按天结，R15 基准）
+2. **Per span**（按小时结，R16 低延迟）
+3. **Per group of $X_s$ slots**（按周结，R17 极高频/低功耗）
+
+这段协议是一句**全局的总结定义**：它宣告，不管你用上面哪一种时间周期来算账，手机“盲检能力”这个词的物理内涵是绝对统一的。它永远只由**两个核心指标**来定义。
+
+### 🎯 第二关：能力的“两把标尺” (Candidates 与 CCEs)
+基站要衡量一个手机在一个时间段内会不会“过载”，必须同时卡死以下两个物理极限：
+1. **最多能猜几次密码？ (Maximum number of PDCCH candidates)**：
+   这就好比限制了手机芯片里的**解码器（Polar Decoder）**的最高运转次数。哪怕每个纸条都很小，如果你让手机在短时间内解密 1000 次，解码芯片也会瞬间烧爆。
+2. **最多能看多大面积？ (Maximum number of non-overlapped CCEs)**：
+   这就好比限制了手机芯片的**内存和信道估计（Channel Estimation）模块**。因为在解密之前，手机必须把黑板上这块区域的电磁波信号先存下来，并过滤掉杂音。即使你只让手机解 1 次密码，但如果这张纸条占据了黑板上巨大的面积（比如聚合等级 AL=16，用了 16 个 CCE），对手机的前端信号处理压力也是极大的。协议强调了 **non-overlapped（不重叠）**，因为如果两张纸条贴在同一个格子上，手机只需要对这个格子做一次信道过滤就可以了，算力可以复用。
+
+### 🔄 盲检能力定义的逻辑闭环
+```text
+【PDCCH 盲检能力 (UE Capability) 的通用定义公式】
+
+ 不管时间周期是什么：
+ ├── (1) 经典模式: 每 Slot
+ ├── (2) 极速模式: 每 Span
+ └── (3) 降载模式: 每 X_s 个 Slot
+        │
+        ▼
+ 其能力的天花板，永远被以下两个物理维度的极限所定义：
+   ┌────────────────────────────────────────────────────────┐
+   │ 维度 A (逻辑解密负荷): 该周期内，最多能试解多少个 Candidates (纸条) │
+   │ 维度 B (物理处理负荷): 该周期内，最多能提取多少个不重叠的 CCE (面积) │
+   └────────────────────────────────────────────────────────┘
+ (基站排班时，这两个指标只要有一个超标，就会触发手机的丢弃/降级保护机制)
+```
+
+### 💡 章节硬核总结
+
+**本段协议在 L1 层面对 `PDCCH monitoring capability` 进行了严密的公理化统一定义（Axiomatic Definition）。尽管 3GPP 在不同的 Release 中引入了多维度的时域粒度（Slot, Span, Group of slots），但衡量终端控制信道处理能力的 Cost Metrics（成本度量）始终解耦为两个正交的物理维度：1) 盲检候选数（PDCCH Candidates），直接约束 L1 译码引擎（如 Polar Decoder）的算力开销（Logic complexity）；2) 不重叠控制信道元素（Non-overlapped CCEs），直接约束前端基带内存缓冲（Buffer size）与信道估计（Channel Estimation/Equalization）的面积负荷。这种在任何时域粒度下都保持度量衡一致性的设计，为后续所有复杂的 Overbooking 丢弃算法（如基于 Search Space ID 的降级规则）提供了一个绝对统一的数学判定基准。**
+
+## 📖 协议原文拆解 (十四)：资源冲突第一弹——当“私人小纸条”撞上“系统大广播”
+
+> **协议原文**
+> For monitoring of a PDCCH candidate by a UE, if the UE
+> - has received ssb-PositionsInBurst in SIB1 and has not received ssb-PositionsInBurst in ServingCellConfigCommon for a serving cell, and
+> - does not monitor PDCCH candidates in a Type0-PDCCH CSS set, and
+> - at least one RE for a PDCCH candidate overlaps with at least one RE of a candidate SS/PBCH block, after puncturing if applicable, corresponding to a SS/PBCH block index provided by ssb-PositionsInBurst in SIB1,
+> the UE is not required to monitor the PDCCH candidate.
+
+### 📚 增量术语表
+* **SS/PBCH block (SSB)**：同步信号与物理广播信道块。**一句话解释**：基站向全网广播的最基础、最致命的“救护车警笛”信号，手机靠它找到基站并对准时间。
+* **RE (Resource Element)**：资源粒子。**一句话解释**：5G 物理层最小的资源单位（频域上1个子载波，时域上1个符号），就像屏幕上的一个像素点。
+* **Puncturing**：打孔。**一句话解释**：基站在发数据时，如果遇到了更重要的数据（比如大喇叭），就把原本数据所在的那几个 RE 直接挖空（丢弃不发），用来给大喇叭腾位置。
+
+### 🚪 第一关：基站也会“画错线” (资源重叠)
+基站在分配资源时有时候会发生冲突：它可能把一张调度纸条（PDCCH candidate）贴在了黑板上，但此时恰好是一辆“救护车（系统大广播 SSB）”预定要通过的时间和频率。
+于是，这张小纸条在最底层的物理像素（RE）上，和 SSB 撞车了（Overlap）。
+
+### 🎯 第二关：手机可以“装瞎”的三个前提条件
+当纸条（PDCCH）和救护车（SSB）撞车时，手机能不能直接丢掉这张纸条不看？协议给出了极其严谨的三个前置条件，必须**同时满足**：
+
+1. **信息差期（依赖 SIB1，还没拿到专属配置）**：手机只收到了最基础的 SIB1 广播里的 SSB 位置信息，还没有收到专属信令（`ServingCellConfigCommon`）里更精确的更新信息。这意味着手机对当前环境的认知还处于“大锅饭”阶段。
+2. **看的不是最核心的黑板**：手机当前看这张纸条，不是在 `Type0-PDCCH CSS`（也就是用来调度 SIB1 自身的最高优公告栏）里看的。这说明这张撞车的纸条优先级不够高（可能是寻呼，也可能是普通业务）。
+3. **物理上确实撞车了**：即便考虑了基站可能的“打孔（Puncturing）”操作，这张纸条至少还有一个像素点（RE）和 SIB1 里预告的那个 SSB 撞上了。
+
+### 🛡️ 第三关：启动免死金牌 (Not required to monitor)
+只要上述三个条件同时满足，协议赋予手机一项合法豁免权：
+**`the UE is not required to monitor the PDCCH candidate.`（终端不被要求监听这个 PDCCH 候选者）。**
+
+**物理意义**：
+SSB（同步广播）在 5G 里的优先级是不可撼动的。如果基站粗心大意，把普通纸条压在了 SSB 上，手机强行去解密这张纸条，大概率会因为信号被 SSB 的强能量覆盖而解码失败（全是乱码）。既然注定失败，协议干脆允许手机“装瞎”，直接扔掉这张纸条，节省宝贵的解码算力和电量。
+
+### 🔄 资源重叠冲突判决树
+```text
+【PDCCH 纸条与 SSB 广播车相撞时的处理流程】
+
+ 发现一张 PDCCH 纸条的至少一个像素点 (RE) 和 SSB 撞了！
+        │
+        ├─ 检查条件1：目前只有 SIB1 的 SSB 位置信息吗？ ──► (是) 往下看
+        │
+        ├─ 检查条件2：这张纸条不在最核心的 Type0 公告栏里吗？ ──► (是) 往下看
+        │
+        ▼
+ 【三个条件全中！】
+        │
+        └─► 【合法弃权】：手机理直气壮地丢弃这张纸条 (不消耗盲检算力)。
+            (内心独白：基站你安排的资源冲突了，这锅我不背，我不瞎解了！)
+```
+
+### 💡 章节硬核总结
+
+**本段协议在 L1 物理层 RE (Resource Element) 粒度上，定义了 PDCCH 与下行核心参考信号（SSB）发生资源碰撞（Collision）时的终端异常处理行为。这体现了 5G NR 调度架构中的严格优先级原则：SS/PBCH Block 拥有绝对的物理层豁免权与优先级。当基站由于调度冲突或打孔策略（Puncturing）失误，导致非 Type0-CSS（即非调度 SIB1 自身）的 PDCCH candidate 在物理时频网格上与 SIB1 宣告的 SSB 发生哪怕只有一个 RE 的交叠时，协议通过 `not required to monitor` 原语显式赋予了 UE 免除盲检的权利。这一机制不仅避免了因 SNR 恶化导致的无谓译码尝试，有效降低了 UE 的动态功耗，同时也倒逼网络侧（eNodeB/gNB）的调度器实现必须在时频资源网格上严格规避 SSB 碰撞区带内嵌区域。**
+
+## 📖 协议原文拆解 (十五)：资源冲突第二弹——拿到专属配置后，依然避让“大广播”
+
+> **协议原文**
+> For monitoring of a PDCCH candidate by a UE, if the UE
+> - has received ssb-PositionsInBurst in ServingCellConfigCommon for a serving cell, and
+> - does not monitor PDCCH candidates in a Type0-PDCCH CSS set, and
+> - at least one RE for a PDCCH candidate overlaps with at least one RE of a candidate SS/PBCH block, after puncturing if applicable, corresponding to a SS/PBCH block index provided by ssb-PositionsInBurst in ServingCellConfigCommon,
+> the UE is not required to monitor the PDCCH candidate.
+
+### 📚 增量术语表
+* **ServingCellConfigCommon**：服务小区公共配置。**一句话解释**：手机在度过了“只靠听 SIB1 广播度日”的极早期阶段后，基站下发的一份更精确、更详细的本小区公共参数说明书。它里面的信息优先级高于 SIB1。
+
+### 🚪 第一关：似曾相识的条款，只是“说明书”升级了
+如果你仔细看，这一段和上一段（第十四段）长得几乎一模一样。
+它们处理的都是同一个核心冲突：**基站安排的小纸条（PDCCH）和系统大广播（SSB）在物理像素（RE）上撞车了。**
+
+**区别在哪里？**
+区别在于手机手中拿着的“时刻表”更新了：
+* **上一段**：手机只拿到了最原始的 `SIB1` 时刻表。
+* **这一段**：手机已经收到了更权威的 `ServingCellConfigCommon` 时刻表。
+
+### 🎯 第二关：升级后的免听逻辑
+当手机拿到了 `ServingCellConfigCommon` 之后，它脑子里的 SSB（救护车）的发车时刻表就被刷新了。
+此时，如果再次发生资源撞车，判定条件变成了：
+1. **参考依据更新**：目前是以 `ServingCellConfigCommon` 里的 SSB 位置信息为准。
+2. **非最核心黑板**：看的依然不是用来调度最高优系统消息的 `Type0-PDCCH CSS`。
+3. **物理重叠**：哪怕考虑了打孔（Puncturing），这张纸条还是和 `ServingCellConfigCommon` 里指示的 SSB 像素点撞上了。
+
+**结果也是一样的霸道**：
+只要满足这三个条件，手机依然享有合法豁免权：**直接扔掉这张纸条，不用去解它（not required to monitor）！**
+
+### 🔄 更新时刻表后的免检逻辑
+```text
+【PDCCH 纸条与 SSB 广播车相撞】
+
+手机翻开手中的时刻表：
+发现不再是初始的 SIB1，而是已经拿到了更新的 ServingCellConfigCommon！
+        │
+        ├─► 检查：这张纸条在 Type0 公告栏吗？ ──(不在)──► 往下走
+        │
+        ├─► 检查：和新时刻表上的 SSB 物理像素(RE)撞了吗？ ──(撞了哪怕1个点)──► 往下走
+        │
+        ▼
+ 【符合豁免条件】
+ 手机直接放弃盲检这张纸条，算力省下，防止解出一堆乱码。
+```
+
+### 💡 章节硬核总结
+
+**本段协议是前述 SSB 碰撞规避法则在连接态或 RRC 配置更新后的自然延续（Forward Extension）。在 5G RRC 状态机中，终端对 SS/PBCH block 位置分布的认知会随着系统信息的获取而发生从 `SIB1` 到 `ServingCellConfigCommon` 的平滑过渡。本条款严密地覆盖了终端在获取到 `ServingCellConfigCommon` 后的状态，确保无论在哪一个 RRC 配置阶段，L1 物理层对于“非 Type0 CSS 的 PDCCH Candidate 一旦与信令宣告的 SSB 发生 RE 级交叠即可合法 Drop（丢弃）”这一最高优先级避让准则的判定逻辑保持绝对的连贯性与自洽性。这在底层软件实现中，意味着碰撞检测模块（Collision Detection Engine）的输入源由 SIB1 数据库无缝切换到了 ServingCellConfigCommon 数据库，而核心丢弃逻辑保持不变。**
+
+## 📖 协议原文拆解 (十六)：资源冲突第三弹——在多天线塔(mTRP)场景下的精准避让
+
+> **协议原文**
+> For monitoring of a PDCCH candidate by a UE, if the UE
+> - has received ssb-PositionsInBurst in SSB-MTCAdditionalPCI for a serving cell, and
+> - at least one RE for a PDCCH candidate overlaps with at least one RE of a candidate SS/PBCH block, after puncturing if applicable, corresponding to a SS/PBCH block index provided by ssb-PositionsInBurst in SSB-MTCAdditionalPCI with same physical cell identity as the one associated with a RS having same quasi-collocation properties as a CORESET for the PDCCH candidate,
+> the UE is not required to monitor the PDCCH candidate.
+
+### 📚 增量术语表
+* **SSB-MTCAdditionalPCI**：附加物理小区ID的 SSB 测量时间配置。**一句话解释**：这是 5G 后期版本（比如支持多发射点 mTRP 时）引入的高级配置。基站不仅让你测本小区的天线塔信号，还让你去测另外一个有着“不同物理小区ID（Additional PCI）”的天线塔发射的 SSB 信号。
+* **Physical Cell Identity (PCI)**：物理小区ID。**一句话解释**：每个基站天线塔在空气中发送的无线电“身份证号”。
+
+### 🚪 第一关：复杂的双塔环境 (mTRP)
+前两段（14和15段）处理的都是“本小区的调度纸条”碰上了“本小区的救护车（SSB）”的简单情况。
+但现在，网络变得极其复杂：手机连着一个服务小区，但这个服务小区是由**两个不同的小区ID的天线塔**（比如天线塔 A 和天线塔 B）一起协作来给你发数据的。
+这时候，如果遇到资源重叠，手机该不该扔掉纸条？协议给出了极其严谨的**交叉印证逻辑**。
+
+### 🎯 第二关：精准避让的“同源鉴定法”
+协议说，只有满足以下连环条件，你才能合法扔掉纸条：
+1. **拿到了高级时刻表**：手机收到了 `SSB-MTCAdditionalPCI`，也就是知道了天线塔 B（附加 PCI）的发车时刻表。
+2. **发生物理重叠**：一张小纸条（PDCCH）和天线塔 B 发出的 SSB 在像素点（RE）上撞车了。
+3. **【核心条件】波束与天线塔同源 (同 PCI)**：
+   这张纸条贴在哪个黑板（CORESET）上？这个黑板的波束方向（QCL参考信号）属于哪个天线塔的身份证号（PCI）？
+   如果这个黑板的身份证号，**恰好等于**发生撞车的那个天线塔 B 的身份证号，那么恭喜你，这俩是一个塔发出来的，可以触发避让机制。
+
+**生活类比**：
+你在广场上，同时有两个大喇叭（塔A和塔B）在喊你。
+* 塔B 的大喇叭（SSB）正在播报紧急广播。
+* 这时候，塔B 也顺便在它的专属黑板（同 PCI 的 CORESET）上贴了一张小纸条给你。
+小纸条和紧急广播的时间地点撞车了。因为它们**同属于塔B（同源干扰）**，紧急广播的声音会直接盖掉小纸条，小纸条肯定没法看，你可以直接扔掉不看（not required to monitor）。
+
+**反向思考（如果不同源呢？）**：
+如果这张纸条是贴在**塔A**的黑板上，而撞车的是**塔B**的大喇叭。因为它们在物理空间上来自两个截然不同的方向（不同的 QCL，不同的 PCI），手机高级的接收天线也许可以通过空间抗干扰技术（波束赋形）在屏蔽塔B大喇叭的同时，清晰地看清塔A的纸条。这时候，协议**就不允许你随意扔掉纸条**了，你还得尝试去解！
+
+### 🔄 多塔(mTRP)场景下的精准避让逻辑链
+```text
+发现一张纸条(PDCCH) 与 【附加塔(Additional PCI)】的 SSB 撞车了！
+        │
+        ├─► 追踪这张纸条的背景：
+        │    纸条所在黑板(CORESET)的波束来源是哪个 PCI？
+        │
+        ├──► 【是同一个附加塔的 PCI (同源)】
+        │       └─► 属于塔内严重互扰，信号被彻底盖死。
+        │           ✅ 合法弃权：手机不解这张纸条！
+        │
+        └──► 【是另一个塔的 PCI (异源空间复用)】
+                └─► 可以通过多天线空间滤波隔离干扰！
+                    ❌ 不准弃权：手机必须尝试去解这张纸条！
+```
+
+### 💡 章节硬核总结
+
+**本段协议将 PDCCH 与 SSB 的冲突避让（Collision Avoidance）机制升维至 Rel-17 引入的多发送接收点（mTRP）及异构 PCI 协同调度场景。在多 PCI 架构下，终端（UE）会同时维持针对 Serving Cell PCI 以及 Additional PCI 的 SSB 测量窗口（MTC）。协议在此处实施了极为精密的“空间维同源性（Spatial-Source Homogeneity）”判定法则：只有当发生碰撞的 PDCCH Candidate 其寄宿的 CORESET 的 TCI-State (QCL属性) 溯源出的物理小区标识（PCI），与导致物理 RE 重叠的那个干扰源 SSB 所属的 Additional PCI 完全一致时，终端才被允许丢弃该 PDCCH 的盲检任务。这一设定从底层 L1 避免了跨 TRP 空间解耦调度时被错误地触发本地丢弃机制，最大限度地保护了 mTRP 架构下的调度容量。**
+
+## 📖 协议原文拆解 (十七)：公共大喇叭不讲“外地方言” (核心 CSS 的 PCI 约束)
+
+> **协议原文**
+> A UE is not required to monitor PDCCH candidates for a Type0/0A/0B/1/1A /2/2A -PDCCH CSS set when the active TCI state for a corresponding CORESET is not associated with physCellId in ServingCellConfigCommon.
+
+### 📚 增量术语表
+* **Type0/0A/0B/1/1A /2/2A -PDCCH CSS set**：核心公共搜索空间大家族。**一句话解释**：这些都是基站用来发全网广播、初始随机接入回执、寻呼找人等极其重要的“公共大喇叭”。
+* **active TCI state**：激活的传输配置指示状态。**一句话解释**：当前这个黑板（CORESET）正在使用的“波束方向”和“天线对准参数”。
+* **physCellId (Physical Cell ID)**：物理小区ID。**一句话解释**：基站天线塔的唯一“身份证号”。写在 `ServingCellConfigCommon` 里的是你的“正牌服务小区（大本营）”的身份证号。
+
+### 🚪 第一关：“公共大喇叭”的绝对归属权
+在 5G 复杂的网络部署里，基站为了提高网速，可能会把个人业务的数据（USS 里的纸条）通过其他协作的天线塔（不同的小区 ID）发送给你。这就叫**跨塔调度**。
+但是！这段协议给那些极其重要的**公共消息（所有的 Type CSS 大家族）**划定了一条神圣不可侵犯的底线：
+**公共大喇叭，必须且只能由你的“正牌服务小区（本尊）”亲自播报！**
+
+### 🎯 第二关：如果大喇叭里传出“外地方言”怎么办？
+协议规定，手机在听这些核心公共公告栏（CSS）时，必须检查当前用来接收信号的天线波束参数（active TCI state）。
+如果手机发现：**“咦？这个公告栏的波束源头，竟然不是指向我的正牌小区 ID（physCellId），而是指向了某个外来的、协作的小区 ID ？”**
+只要发生这种情况，手机拥有绝对的豁免权：
+**`not required to monitor`（直接拒绝监听这个公共黑板上的所有纸条！）**
+
+**生活类比**：
+你在“A村”（你的服务小区）当村民。村里有个大广播喇叭（CSS），专门播报村委会通知（Type0）、洪水警报（Type2）等。
+为了让你听广播更清楚，村长说：“大家听广播时，要把耳朵朝向村口那棵大树（TCI state 关联到 A村的物理ID）。”这很正常。
+但如果有一天，村长突然修改了广播站的配置，让你“把耳朵朝向隔壁的 B村去听 A村的洪水警报（TCI state 关联到非本村的物理ID）”。
+面对这种荒谬的指令，协议赋予了你底气：**你可以直接不听（不监听盲检），因为这违反了公共信息必须由本村亲自发布的根本法！**
+
+### 🔄 公共搜索空间 (CSS) 的波束血统核查
+```text
+【手机准备监听极其关键的 Type0/0A/0B/1/1A/2/2A CSS 公共黑板】
+
+检查该黑板当前激活的波束配置 (Active TCI state)
+        │
+        ├─► 追溯其波束的源头 (Source RS) 属于哪个物理小区 ID (PCI)？
+        │
+        ├──► 【情况 1：PCI == 我自己的服务小区 ID】
+        │       └─► 血统纯正。✅ 必须老老实实监听盲解！
+        │
+        └──► 【情况 2：PCI != 我自己的服务小区 ID (外来 PCI)】
+                └─► 荒谬配置！系统级公共消息不该由外地塔代发。
+                    ✅ 合法罢工：手机直接无视该黑板上的所有候选者，拒绝监听！
+```
+
+### 💡 章节硬核总结
+
+**本段协议在 L1 层面硬性规范了核心公共搜索空间（Common Search Space, CSS）组的空间域波束溯源（Spatial Beam Traceability）边界。随着 Rel-16/17 中 mTRP（多发送接收点）及 Inter-cell multi-TRP 架构的引入，网络侧可以利用具备异构 PCI 的射频节点（Additional/Non-serving PCI）来为终端下发控制信令（TCI-State 关联到异构 PCI）。然而，协议在此处画下红线：对于承载系统信息、随机接入、寻呼等生命线广播控制信道的 Type0~Type2A CSS 簇，其宿主 CORESET 的激活 TCI-State 必须具备绝对的本地同源性。一旦其 TCI 状态关联到非 `ServingCellConfigCommon` 宣告的 `physCellId`，终端有权拒绝盲检。这在极大地简化了底层物理层状态机抗错能力的同时，也从规范层面封堵了网络侧在关键系统广播上滥用异地协同调度可能带来的协议紊乱。**
+
+## 📖 协议原文拆解 (十八)：看最重要黑板时的“清场假设” (Type0-PDCCH 的特权)
+
+> **协议原文**
+> If a UE monitors the PDCCH candidate for a Type0-PDCCH CSS set on the serving cell according to the procedure described in clause 13, the UE may assume that no SS/PBCH block is transmitted in REs used for monitoring the PDCCH candidate on the serving cell.
+
+### 📚 增量术语表
+* **Type0-PDCCH CSS set**：Type0 公共搜索空间。**一句话解释**：这是整个 5G 系统里**优先级最高**的一块黑板！它上面贴的纸条，是指引手机去接收 `SIB1`（系统信息块1，这是手机入网必看的总规章制度）的。
+* **clause 13**：第 13 章。**一句话解释**：专门讲手机如何接收 SIB1 等基础系统广播的章节。
+* **may assume**：可以假设。**一句话解释**：物理层标准用语。意味着“基站保证一定不会这么干，所以手机在底层电路设计时，直接不用去防备这种可能性，放心大胆地干”。
+
+### 🚪 第一关：最高优先级的黑板，绝不能被碰瓷
+前面拆解时（第十四、十五段），我们讲过：如果普通的黑板（PDCCH）和救护车（SSB）撞车了，普通黑板直接作废，手机可以装瞎不看。
+但是，这里提到了一个极其特殊的存在：**Type0-PDCCH CSS**。
+这块黑板是用来调度 `SIB1` 的，是整个 5G 网络能够运转的基石。如果连这块黑板也被随便撞车作废了，手机就连网都入不了了！
+
+### 🎯 第二关：基站的底层承诺（清场保障）
+为了保护这块最神圣的黑板，协议从**基站发射侧**给出了一个绝对承诺，并允许手机在接收侧**大胆假设**：
+当手机去监听这块 Type0 公共黑板上的小纸条时，手机**完全可以假设（may assume）**，基站**绝对不可能**把任何一个救护车（SSB）的像素点（RE）安排在这个黑板的位置上。
+
+**物理意义**：
+基站在排兵布阵时，必须对 Type0-PDCCH 和 SSB 进行完美的正交隔离（要么在时间上错开，要么在频率上错开）。这就像是在公路上划出了一条不可侵犯的应急车道，即使是救护车（SSB），在此时此刻也绝不允许驶入这条特定的车道，从而为 Type0 营造了一个绝对干净、无干扰的“清场”环境。
+
+**生活类比**：
+（前面讲的）：你作为一个普通快递员（看普通纸条），路上看到有救护车（SSB）过来，你必须靠边停车（扔掉纸条不看）。
+（这段讲的）：现在你手里拿的是**“国家最高机密文件”（Type0-PDCCH）**。交管局（协议）向你保证：“当你跑这条专线去取文件时，我们已经封锁了整条道路。你放心大胆地闭着眼睛往前冲，在这条路上**绝对不可能**有任何救护车突然窜出来干扰你！”
+
+### 🔄 Type0 特权与普通空间的差异树
+```text
+【PDCCH 盲检时的资源碰撞防御策略】
+
+手机开始看黑板 (Monitor PDCCH candidates)
+        │
+        ├─► 【普通业务 / 其他公共黑板 (如 Type1, Type2, USS)】
+        │       └─► 必须防备！如果和 SSB 撞车了，启动自保机制 ──► (放弃解密)
+        │
+        └─► 【国家机密黑板 (Type0-PDCCH CSS，找 SIB1 专用)】
+                └─► 放弃防备！直接在电路层面假设“本区域绝对清场”。
+                    基站若敢在这里排 SSB 就是基站违规，手机只管全速解密，无需执行碰撞判定。
+```
+
+### 💡 章节硬核总结
+
+**本段协议确立了初始接入阶段控制信道网络拓扑的最高优先级边界：Type0-PDCCH CSS 区域的“绝对射频洁净度（Absolute RF Cleanliness）”假设。对于承载 RMSI (Remaining Minimum System Information, 即 SIB1) 调度任务的 CORESET 0 及相关的 Type0 Search Space，基站侧在资源映射网格（Resource Grid）调度算法上负有强制排他义务。协议通过 `may assume` 原语，豁免了 UE 侧在盲检 Type0 PDCCH 时需要执行的 RE 级 SSB 碰撞避让判定（Collision Detection Overhead）。这种正交化设计确保了在最恶劣的未同步或冷启动开环阶段，最底层的信令管道不被同信道的任何高能导频或同步信号所吞噬，极大提升了盲检的成功率并简化了 L1 ASIC 的状态机逻辑。**
+
+## 📖 协议原文拆解 (十九)：当 5G 小纸条被 4G 的“老钉子”扎破 (LTE CRS 冲突)
+
+> **协议原文**
+> If at least one RE of a PDCCH candidate for a UE on the serving cell overlaps with at least one RE of lte-CRS-ToMatchAround or of LTE-CRS-PatternList, the UE
+> - is not required to monitor the PDCCH candidate if the UE is not provided pdcchCandidateReception-WithCRSOverlap,
+> - monitors the PDCCH candidate if the UE is provided pdcch-CandidateReceptionWithCRSOverlap and the UE indicates an associated capability corresponding to the configuration of lte-CRS-ToMatchAround or of LTE-CRS-PatternList [18, TS 38.306].
+
+### 📚 增量术语表
+* **LTE CRS (lte-CRS-ToMatchAround / LTE-CRS-PatternList)**：4G 小区特定参考信号及其避让图纸。**一句话解释**：在 4G/5G 共享基站（DSS 动态频谱共享）时，4G 信号里那些去不掉的、像地钉一样散布在各个角落的“常驻信号”。
+* **pdcchCandidateReception-WithCRSOverlap**：允许在 CRS 重叠下接收 PDCCH 的配置。**一句话解释**：基站发给手机的一本“高级补洞技能书”，告诉手机：“如果小纸条被 4G 的地钉扎破了，你不要扔，绕开那些破洞拼凑一下继续看！”
+
+### 🚪 第一关：历史遗留问题——与 4G 前辈合租的烦恼
+现在的 5G 网络，为了节省频段资源，经常会和 4G LTE “合租”在同一个频段上（这叫 DSS 技术）。
+但是，4G LTE 有一个极具标志性的“老大难”问题：它有一套叫 CRS 的参考信号，像满地撒的钉子一样，密密麻麻地扎在时频网格里，去都去不掉。
+如果基站在贴 5G 的调度小纸条（PDCCH）时，不小心把纸条贴在了 4G 的 CRS 钉子上（RE 发生物理重叠），这张 5G 纸条就被扎破了（被 4G 信号干扰覆盖）。
+
+### 🎯 第二关：没学过“缝补术”的普通人 (直接弃权)
+遇到这种被 4G 钉子扎破的纸条，手机该怎么办？协议给出了两种截然不同的态度：
+* **情况 A**：如果手机**没有**收到基站下发的 `pdcchCandidateReception-WithCRSOverlap`（补洞技能书）。
+手机看到纸条破了字看不清，会理直气壮地说：“这题超纲了，我没这技术！”
+于是启动合法豁免权：**`not required to monitor`（直接把纸条扔垃圾桶，不解了）**。
+
+### 🧩 第三关：持证上岗的“高级裁缝” (必须绕开钉子解密)
+如果基站想在这么恶劣的环境下硬传控制信息，它必须启用高级玩家模式：
+* **情况 B**：基站给手机发了“补洞技能书”（配置了参数），同时，手机在出厂时也向基站拍过胸脯：“老板，我拥有极其强大的运算能力，给我 4G CRS 的位置图纸，我能搞定！”（UE indicates an associated capability）。
+在这种强强联合下，协议态度大变：
+手机**必须去监听（monitors the PDCCH candidate）**！
+它会在底层物理电路里，精准地把那些被 4G 钉子扎破的像素点（RE）抠掉，假装它们不存在，然后用剩下的残缺数据，通过强大的纠错算法（Rate Matching，速率匹配）硬生生地把原本的 DCI 调度指令还原出来！
+
+### 🔄 5G 纸条碰上 4G 钉子的判决树
+```text
+【5G PDCCH 候选者 与 4G CRS 发生 RE 级物理重叠】
+        │
+        ├─► 手机检查自己有没有收到“允许在冲突下接收”的配置证书？
+        │
+        ├──► 【没有配置】 (普通打工人)
+        │       └─► 字被扎破了看不了！
+        │           ✅ 合法弃权：扔掉纸条，不消耗算力盲检。
+        │
+        └──► 【有配置 + 自身能力支持】 (高级缝补裁缝)
+                └─► 必须干活！
+                    根据基站给的 4G 钉子分布图 (LTE-CRS-PatternList)，
+                    精准抠掉破损像素，用剩余有效像素硬算还原出 DCI 指令！
+```
+
+### 💡 章节硬核总结
+
+**本段协议是 5G 物理层为解决 DSS（Dynamic Spectrum Sharing，动态频谱共享）场景下跨 RAT (Radio Access Technology) 共存干扰而设计的经典 L1 Rate Matching 避让机制。由于 LTE CRS 在时频网格中具有全带宽、高密度、不可消除的特性，5G PDCCH 极易与其发生 RE 级碰撞。为避免 SNR 灾难导致的盲检失败，协议解耦了 UE 的行为：对于基础 UE，遇到此类碰撞直接视为非法映射并丢弃盲检（Drop）；而对于支持高级 Rate Matching 能力的高阶 UE，网络可以通过 RRC 下发显式的冲突接收使能参数，强制终端在提取 PDCCH LLR (Log-Likelihood Ratio) 软信息时，精准打孔（Puncture/Rate match around）掉落入 LTE CRS 的 RE 资源。这极大提升了在严重碎片化的 DSS 频谱上部署 5G 控制信道的容量与鲁棒性与调度自由度。**
+
+## 📖 协议原文拆解 (二十)：共享频段里的“红绿灯”与“默认放行” (RB Set 状态避让)
+
+> **协议原文**
+> If a UE is provided availableRB-SetsPerCell, the UE is not required to monitor PDCCH candidates that overlap with any RB from RB sets that are indicated as unavailable for receptions by an available RB set indicator field in DCI format 2_0 as described in clause 11.1.1. If the UE does not obtain the available RB set indicator for a symbol, the UE monitors PDCCH candidates on all RB sets in the symbol.
+
+### 📚 增量术语表
+* **availableRB-SetsPerCell**：单小区可用 RB 集合配置。**一句话解释**：开启了一种“动态地盘汇报”功能，通常用于共享频谱（NR-U），因为那里的频段是被大家抢来抢去的，某些地盘可能随时被别人占走。
+* **DCI format 2_0 (Available RB set indicator)**：包含可用地盘指示的 DCI 2_0。**一句话解释**：基站发出的一个全网“红绿灯”交通广播，告诉你：“兄弟们，1号地盘我抢到了（绿灯可用），2号地盘被 Wi-Fi 抢走了（红灯不可用）。”
+* **Unavailable for receptions**：不可用于接收。**一句话解释**：由于基站没抢到这个地盘的发送权，导致这个地盘里根本没有 5G 信号，只有白噪音或别人的干扰。
+
+### 🚪 第一关：交通广播说“前方封路” (红灯避让)
+在免授权共享频段（NR-U）里，基站发数据之前也得“先听后发（LBT）”。如果基站没抢到信道，那块频率（RB Set）就废了。
+为了不让手机像傻子一样在废频率上苦等，基站如果成功抢到了其他频段，就会用 `DCI format 2_0` 赶紧广播一个“红绿灯指示”。
+协议规定：如果手机**成功收到了交通广播**，并且广播里明确说某个 RB Set 是**“红灯（Unavailable）”**。
+那么，任何试图贴在这个“封路地盘”上的小纸条（PDCCH candidates），手机统统享有合法豁免权：**`not required to monitor`（直接无视，根本不要去浪费算力解它！）**。
+
+**生活类比**：
+交管局（基站）在群里发广播（DCI 2_0）：“注意！东直门大街（某个 RB Set）刚刚被 Wi-Fi 施工队挖断了，禁止通行（Unavailable）！”
+这时，如果你看到你的派件单（搜索空间排班表）上原本写着要去东直门大街的公告栏看纸条。既然交管局都说路断了，你去了肯定也是白跑一趟（只有噪音）。所以你理直气壮地直接坐在原地不去了，节省汽油（算力）。
+
+### 🎯 第二关：没听清广播怎么办？ (默认绿灯前行)
+但是，这个“交通广播（DCI 2_0）”本身也是在空气中传播的，万一手机恰好没收到、漏听了怎么办？
+这时，手机面临一个状态盲区：我不知道前面的路到底是断了还是通的。
+协议给出了极为硬核的“盲动”底线：**如果你没收到红绿灯指示（does not obtain），你绝对不能原地躺平！你必须默认所有的路都是通的（all RB sets），硬着头皮去所有的公告栏把纸条全看一遍！**
+
+**物理意义**：
+“宁可错杀一千（白费算力去解噪音），不可放过一个（漏解关键调度）。”
+如果没收到指示就瞎假设不可用，会导致手机错过基站好不容易抢到信道发出的调度指令。所以，在信息缺失时，物理层必须执行最悲观（工作量最大）的假设：全量盲检！
+
+### 🔄 RB Set 动态可用性状态机
+```text
+【手机准备在某个符号的多个 RB Set 上进行 PDCCH 盲检】
+        │
+        ├─► 检查：我刚才收到过 DCI 2_0 的交通广播吗？
+        │
+        ├──► 【收到了】 (有明确的路况信息)
+        │       │
+        │       ├─ 地盘 A：显示为 Unavailable (红灯) ──► ❌ 放弃看地盘 A 的黑板！
+        │       └─ 地盘 B：显示为 Available (绿灯) ────► ✅ 正常去看地盘 B 的黑板！
+        │
+        └──► 【没收到 / 错过了】 (两眼一抹黑)
+                └─► 协议底线机制启动！
+                    假装所有的地盘都是绿灯！
+                    ✅ 地盘 A 的黑板去解！ ✅ 地盘 B 的黑板也去解！ (算力全开硬抗)
+```
+
+### 💡 章节硬核总结
+
+**本段协议定义了 NR-U（Shared Spectrum）场景下，基于动态信道可用性指示（DCI format 2_0）的 PDCCH 盲检动态裁剪（Dynamic Pruning）机制。由于 LBT（Listen-Before-Talk）结果的不可预知性，基站的实际发射带宽在频域上是以 RB Set 为粒度动态变化的。为了避免终端在 LBT 失败（基站未发射）的空资源上进行毫无意义的能量积分与极化译码从而导致无谓的功耗与 False Alarm，协议允许 UE 利用 DCI 2_0 的前馈信息对盲检候选集进行实时剪枝。但更为关键的是，为了防止 DCI 2_0 自身的漏检导致的 Error Propagation（错误蔓延），协议设计了极其保守的 Failsafe（防故障）准则：在缺乏前馈指示的状态盲区，UE 必须回退至静态 RRC 配置的全集状态，对所有 RB Sets 强行进行遍历盲检。**
+
+## 📖 协议原文拆解 (二十一)：算账的高级数学题——多基站协同 (mTRP) 下的盲检能力折算
+
+> **协议原文**
+> If a UE can support
+> - a first set of $N_{cells,0}^{DL}$ serving cells where the UE is either not provided coresetPoolIndex or is provided coresetPoolIndex with a single value for all CORESETs on all DL BWPs of each scheduling cell from the first set of serving cells, and
+> - a second set of $N_{cells,1}^{DL}$ serving cells where the UE is not provided coresetPoolIndex or is provided coresetPoolIndex with a value 0 for a first CORESET, and with a value 1 for a second CORESET on any DL BWP of each scheduling cell from the second set of serving cells
+> the UE determines, for the purpose of reporting pdcch-BlindDetectionCA, pdcch-BlindDetectionCA1, and pdcch-BlindDetectionCA3, a number of serving cells as $N_{cells,0}^{DL} + R \cdot N_{cells,1}^{DL}$ where $R$ is a value reported by the UE.
+
+### 📚 增量术语表
+* **Carrier Aggregation (CA) / DL serving cells**：载波聚合 / 下行服务小区。**一句话解释**：手机同时连了好几个频段（比如一边连着主频段，一边连着几个扩展频段加速），$N_{cells}^{DL}$ 就是统计你同时收几个频段的数据。
+* **coresetPoolIndex**：CORESET 池索引。**一句话解释**：这是多基站塔协作（mTRP）的核心标志！如果一个频段里的黑板（CORESET）被标上了不同的 Pool Index（比如一部分是 0，一部分是 1），说明这个频段是由两个不同的物理天线塔同时在给你发信号的。
+* **$N_{cells,0}^{DL}$**：第一类小区数量（单塔小区）。**一句话解释**：在这个频段里，所有的黑板都只有同一个 Pool Index（或者干脆没标），说明只有一个塔在干活。
+* **$N_{cells,1}^{DL}$**：第二类小区数量（双塔/mTRP小区）。**一句话解释**：在这个频段里，黑板被明确分成了 Pool 0 和 Pool 1 两拨，说明有两个塔在同时干活，手机的接收复杂度直接翻倍。
+
+### 🚪 第一关：手机向上级汇报“总承载力”
+手机能同时并行处理几个载波（服务小区）的盲检任务，是有物理极限的。手机必须把自己的这个能力（比如 `pdcch-BlindDetectionCA`，载波聚合下的盲检能力上限）汇报给基站。
+但在 5G 引入 mTRP（多天线塔）技术后，计算“你到底扛了几个小区”的方式变了！因为有些小区里藏着两个塔在同时给你发数据。
+
+### 🎯 第二关：双塔小区的“膨胀折算率 (R)”
+为了公平地核算手机的脑力消耗，协议发明了一个**折算公式**：
+总承载小区数 = 单塔小区数 ($N_{cells,0}^{DL}$) + 折算系数 ($R$) × 双塔小区数 ($N_{cells,1}^{DL}$)
+
+* 如果一个小区是**单塔单发（第一类小区）**，它的权重就是 1，算 1 个小区的工作量。
+* 如果一个小区是**双塔协作（第二类小区，存在 Pool 0 和 1）**，手机要在同一个频段里同时盯着两个天线塔发来的不同纸条空间（非理想回程或高强度复用），这对芯片算力的挤压非常可怕。
+* 此时，手机会根据自己的硬件架构，向基站上报一个**折算系数 $R$**（通常大于 1）。
+* 这句话的意思是：**“老板，我处理这 1 个双塔小区的工作量，顶得上处理 $R$ 个普通的单塔小区！你给我算工资（分配盲检预算）的时候，得按 $R$ 倍给我膨胀着算！”**
+
+### 🔄 载波聚合盲检能力的折算公式图解
+```text
+【手机向上报自己的总调度承载能力】
+
+ 假设手机同时连了 5 个频段 (小区)：
+ ├─ 频段 A (只有单塔在发) ───► $N_{cells,0}$ = 3 个这种小区
+ ├─ 频段 B (只有单塔在发)      (权重为 1)
+ ├─ 频段 C (只有单塔在发)
+
+ ├─ 频段 D (塔1和塔2同时发!) ─► $N_{cells,1}$ = 2 个这种小区
+ └─ 频段 E (塔1和塔2同时发!)    (难度翻倍！手机上报折算系数 R = 2)
+
+ 【最终能力基站侧核算】：
+ 手机上报的能力必须覆盖： 3 + 2 × 2 = 7 个“当量单塔小区”的工作量预算！
+ (如果基站乱排班超过了这个当量折算上限，手机底层的安全丝就会熔断丢弃任务)
+```
+
+### 💡 章节硬核总结
+
+**本段协议是 5G L1 层为了适配 Rel-16 mTRP (Multi-TRP) NCJT (Non-Coherent Joint Transmission) 架构，而在 Carrier Aggregation (CA) 盲检能力预算 (Blind Decoding Budget) 核算体系中打入的一块关键补丁。在 NCJT 中，UE 会在一个 Component Carrier 上收到属于两组完全正交的 CORESET Pools (通过 `coresetPoolIndex` 区分) 的 PDCCH candidates，这在基带底层的接收前端（Receiver Front-end）和译码管线上等效于多增加了一路逻辑载波的负担。为了在不推翻原有 CA 盲检上限框架的前提下真实反映 UE 的物理层压力，协议引入了基于 UE Capability 上报的线性折算因子 $R$。通过将 mTRP 载波等效膨胀为 $R$ 个普通载波的计算方式，优雅地完成了复杂空间域多工调度到一维算力预算模型的数学映射。**
+
+## 📖 协议原文拆解 (二十二)：超大带宽玩家的“算力声明” (CA>4 小区时的能力上报)
+
+> **协议原文**
+> If a UE indicates in UE-NR-Capability a carrier aggregation capability larger than 4 serving cells and the UE is not provided monitoringCapabilityConfig for any downlink cell or if the UE is provided monitoringCapabilityConfig = r15monitoringcapability for all downlink cells where the UE monitors PDCCH, the UE includes in UE-NR-Capability an indication for a maximum number of PDCCH candidates and for a maximum number of non-overlapped CCEs the UE can monitor per slot when the UE is configured for carrier aggregation operation over more than 4 cells. When a UE is not configured for NR-DC operation, the UE determines a capability to monitor a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs per slot that corresponds to $N_{cells}^{cap}$ downlink cells, where
+> - $N_{cells}^{cap}$ is $N_{cells,0}^{DL}+R \cdot N_{cells,1}^{DL}$ if the UE does not provide pdcch-BlindDetectionCA where $N_{cells,0}^{DL}+N_{cells,1}^{DL}$ is the number of configured downlink serving cells
+> - otherwise, $N_{cells}^{cap}$ is the value of pdcch-BlindDetectionCA
+
+### 📚 增量术语表
+* **UE-NR-Capability**：UE的NR能力报告。**一句话解释**：手机入网时递交给基站的一份详细“个人简历”，里面写明了自己支持几个载波聚合、芯片最高算力是多少等极其底层的硬件参数。
+* **Carrier aggregation capability larger than 4**：载波聚合能力大于 4 个小区。**一句话解释**：只有旗舰级的 5G 手机才能同时聚合 5 个甚至更多的高速频段。这是通信里的高端玩家。
+* **$N_{cells}^{cap}$**：手机声明支持的载波盲检容量上限。**一句话解释**：手机最终算下来，自己这颗芯片到底能抗住几个“当量小区”的总盲检工作量。
+* **pdcch-BlindDetectionCA**：PDCCH 载波聚合盲检能力参数。**一句话解释**：手机在简历里自己主动填报的一个数字，告诉基站“我的总盲检承载力就这么大了”。
+
+### 🚪 第一关：高端玩家必须提交“专项体检报告”
+协议首先划了一条线：**如果手机在简历里吹牛说自己能同时处理超过 4 个下行频段（CA > 4）**，且处于传统的“按天结”模式（R15 能力或缺省配置）。
+那么，协议要求这个手机必须在“简历 (UE-NR-Capability)”里，明明白白、老老实实地交一份**专项体检报告**。
+报告里必须写清楚：**“当网络真的给我挂上超过 4 个频段时，我在每一个时隙（per slot）里，全网所有频段加起来，最多能看多少张纸条（PDCCH candidates），最多能扫多少面积的黑板（non-overlapped CCEs）。”**
+*为什么要写明？* 因为大于 4 载波后，底层的总线带宽和解调芯片极容易瞬间爆表，必须要有全网封顶的数字约束。
+
+### 🎯 第二关：如果手机没主动填报上限，基站怎么算？
+如果手机处于普通组网模式（非 NR-DC 双连接），基站需要知道这台手机的总承载能力 $N_{cells}^{cap}$。
+这里分两种情况：
+1. **手机填了能力值 (otherwise 分支)**：
+   如果手机在简历里明确上报了 `pdcch-BlindDetectionCA`（比如填了 6）。那就按手机报的算，$N_{cells}^{cap} = 6$。基站在排班时，总任务量绝不能超过 6 个小区的基准值。
+2. **手机没填能力值 (第一分支)**：
+   如果手机只说了支持几个频段，但没明确报出总盲检能力数字，那基站就**强行用上一段学到的折算公式来算总账**！
+   把当前配置给你的单塔小区数 ($N_{cells,0}^{DL}$) 和 双塔小区数 ($N_{cells,1}^{DL}$) 加起来，并且给双塔小区乘上膨胀系数 $R$。
+   算出来的这个值，就是你的天花板 $N_{cells}^{cap}$。
+
+### 🔄 旗舰机盲检能力核算树
+```text
+【一台高端手机入网，声明支持聚合 5 个下行载波】
+
+ 必须向基站上交《PDCCH盲检能力专项报告》 (限制了全网 Candidates 和 CCEs 的总和)
+
+ 基站开始核算它的总承载能力 N_cells_cap：
+        │
+        ├─► 手机在报告里主动填了 pdcch-BlindDetectionCA 吗？
+        │
+        ├──► 【填了，值为 7】
+        │       └─► 算力天花板 N_cells_cap = 7。基站照此排班。
+        │
+        └──► 【没填】
+                └─► 启动公式核算：你当前配置了 3 个单塔，2 个双塔，折算系数 R=2。
+                    算力天花板 N_cells_cap = 3 + 2 × 2 = 7。
+                    虽然你连了 5 个实体频段，但你必须承担 7 个频段的算力压力！
+```
+
+### 💡 章节硬核总结
+
+**本段协议定义了在超大载波聚合（Large-scale CA, $N_{cells} > 4$）场景下的 L1 PDCCH 盲检能力（Blind Decoding Capacity）标定机制。当载波数超过 4 时，基带的聚合盲检压力不再是一个可以无脑线性累加的安全值。为此，协议强制要求声明大 CA 能力的 UE 显式上报其在时隙级（per slot）的全局 Candidates 和 CCEs 处理极限。在确定基带能支撑的等效调度容量 $N_{cells}^{cap}$ 时，协议给出了明确的 Fallback 树：优先使用 UE 显式上报的 `pdcch-BlindDetectionCA` 标量值；若 UE 未做显式能力解耦，则退化至根据 RRC 配置的载波类型（单 TRP 还是多 TRP）辅以系数 $R$ 进行基于物理配置的等效数学硬算。这套体系确保了基站在跨载波统一调度时的 Overbooking 预算不至于击穿旗舰手机的物理层前端。**
+
+## 📖 协议原文拆解 (二十三)：NR-DC 双连接下的“分灶吃饭”与“绝对红线”
+
+> **协议原文**
+> When a UE is configured for NR-DC operation, the UE determines a capability to monitor a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs per slot that corresponds to $N_{cells}^{cap}=N_{cells}^{MCG}$ downlink cells for the MCG where $N_{cells}^{MCG}$ is provided by pdcch-BlindDetection for the MCG and determines a capability to monitor a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs per slot that corresponds to $N_{cells}^{cap}=N_{cells}^{SCG}$ downlink cells for the SCG where $N_{cells}^{SCG}$ is provided by pdcch-BlindDetection for the SCG. When the UE is configured for carrier aggregation operation over more than 4 cells, or for a cell group when the UE is configured for NR-DC operation, the UE does not expect to monitor per slot a number of PDCCH candidates or a number of non-overlapped CCEs that is larger than the maximum number as derived from the corresponding value of $N_{cells}^{cap}$.
+
+### 📚 增量术语表
+* **NR-DC operation**：NR-DC (新空口双连接) 操作。**一句话解释**：这是 5G 里最顶级的组网方式，手机同时连接两个纯正的 5G 独立基站（比如一个主基站 MCG 提供广覆盖，一个辅基站 SCG 提供超高网速）。
+* **pdcch-BlindDetection**：专门下发的 PDCCH 盲检能力分配值。**一句话解释**：既然连了两个基站，算力就得“分家”。这是明确分给各自主机站和辅基站的“盲检预算配额”。
+
+### 🚪 第一关：双连接必须“分灶吃饭” (独立核算)
+在上一段我们讲了单基站超多载波（CA > 4）的情况，天花板是统一的一个 $N_{cells}^{cap}$。
+但当手机进入 **NR-DC（双 5G 基站连接）**模式后，因为是两个不同的基站在同时给你下发指令，为了防止两边抢算力打架，协议规定必须**严格“分家核算”**：
+* 对于主基站群（MCG），它的天花板独立计算，其当量的承载小区数等于网络配置给它的专用配额，即 $N_{cells}^{cap} = N_{cells}^{MCG}$。
+* 对于辅基站群（SCG），它的天花板也是独立计算的，即 $N_{cells}^{cap} = N_{cells}^{SCG}$。
+两边的配额都是由各自 RRC 参数里的 `pdcch-BlindDetection` 字段明确划拨的。谁也不能占用谁的算力预算。
+
+### 🎯 第二关：最高级别的防线 (Does not expect 警告)
+在把算力天花板怎么算（单基站折算、或者双基站分家）都讲得明明白白之后，协议给出了 L1 物理层对基站调度器的**最高级别警告（Red Line）**：
+无论你是一个连了超多频段（>4）的高端玩家，还是一个开了双连接（NR-DC）的玩家，对于任何一个计算好的小区组天花板 $N_{cells}^{cap}$：
+**手机绝对不预期（does not expect）在一个时隙内，实际需要盲检的纸条数量（PDCCH candidates）或扫过的黑板面积（non-overlapped CCEs）会超过由这个 $N_{cells}^{cap}$ 换算出来的绝对上限值！**
+
+**物理意义**：
+这是保护手机芯片不被“烧毁”的最后一道物理防火墙。
+`does not expect` 在 3GPP 语境里意味着：如果基站的排班系统（Scheduler）出 bug 了，排出来的任务总量超出了手机申报的这个天花板，基站属于**严重违规**。面对这种违规排班，手机底层的译码芯片不需要尝试去强行解密，直接罢工丢弃（Drop）多出来的任务是合法的，并且丢包的责任完全在基站。
+
+### 🔄 NR-DC 下的算力分家与红线图
+```text
+【手机开启 NR-DC，同时连接 5G 主基站和 5G 辅基站】
+         │
+         ├─► [MCG 主组] 拿到配额 N_cells_MCG = 3
+         │     └─► 换算出 MCG 的盲检算力上限。
+         │     ⛔ 警告基站A：这边的实际派单量如果超过上限，我直接拒收！
+         │
+         └─► [SCG 辅组] 拿到配额 N_cells_SCG = 2
+               └─► 换算出 SCG 的盲检算力上限。
+               ⛔ 警告基站B：这边的实际派单量如果超过上限，我同样拒收！
+
+(两者在底层的内存和解码器资源上严格物理/逻辑隔离，互不透支)
+```
+
+### 💡 章节硬核总结
+
+**本段协议完成了 5G 高阶多连接架构（NR-DC 及 Large CA）下 PDCCH 盲检能力预算的顶层分配与收敛。在 NR-DC 模式下，由于 MCG 与 SCG 的 MAC 调度器在物理节点上解耦，无法实时进行算力协商。因此，协议在 RRC 配置层面对 UE 整体基带算力实施了强制的静态切片（Static Partitioning），即通过显式的 `pdcch-BlindDetection` 为两个 Cell Group 各自锚定了等效小区上限 $N_{cells}^{MCG}$ 和 $N_{cells}^{SCG}$。随后，协议使用强制排误原语 `UE does not expect` 画下了算力红线。这不仅赋予了 UE 物理层在遭遇网络侧 Overbooking 调度（如 DCI 洪峰）时进行防卫性 Drop 的权利，更是从 3GPP 标准层面划定了网络设备（gNB）调度器算法的安全责任边界。**
+
+## 📖 协议原文拆解 (二十四)：双连接“分家产”的数学红线 (算力守恒定律)
+
+> **协议原文**
+> When a UE is configured for NR-DC operation with a total of $N_{cells}^{DL,NR-DC}$ downlink cells on both the MCG and the SCG, the UE expects to be provided pdcch-BlindDetection for the MCG and pdcch-BlindDetection for the SCG with values that satisfy
+> - pdcch-BlindDetection for the MCG + pdcch-BlindDetection for the SCG <= pdcch-BlindDetectionCA, if the UE reports pdcch-BlindDetectionCA, or
+> - pdcch-BlindDetection for the MCG + pdcch-BlindDetection for the SCG <= $N_{cells}^{DL,NR-DC}$, if the UE does not report pdcch-BlindDetectionCA.
+
+### 📚 增量术语表
+* **$N_{cells}^{DL,NR-DC}$**：NR-DC 下行小区总数。**一句话解释**：手机同时连着主辅两个基站，所有参与下行传输的频段（载波）加在一起的物理总个数。
+* **pdcch-BlindDetectionCA**：终端上报的载波聚合盲检总能力。**一句话解释**：手机出厂时在能力报告里声明的“我这颗芯片到底能扛几个当量的频段”。
+
+### 🚪 第一关：分家可以，但“家产总额”不能变
+上一段讲了，NR-DC 模式下，主基站（MCG）和辅基站（SCG）要“分灶吃饭”，各自拿一个叫 `pdcch-BlindDetection` 的配额去算账。
+但这引出了一个新问题：这两个配额是谁给的？（网络侧配置的）。网络会不会瞎配？比如手机明明只能扛 6 个小区的算力，网络却给主基站配了 4 个，辅基站配了 4 个（加起来等于 8）？
+
+协议为了防止网络侧“乱开空头支票”，在这里设立了极其严格的**“算力能量守恒定律”**。
+网络侧下发给 MCG 的配额加上下发给 SCG 的配额，**加起来绝对不能超过手机的物理底线！**
+
+### 🎯 第二关：判定“算力天花板”的两条分支
+这个物理底线（天花板）到底是多少？这里分两种情况：
+
+1. **“写了简历”的手机 (If UE reports...)**：
+   如果手机在能力报告里明确填了 `pdcch-BlindDetectionCA`（比如手机说我能扛 8 个当量的算力）。
+   那么，`MCG 拿到的份额 + SCG 拿到的份额 必须 <= 8`。
+
+2. **“没写简历”的普通手机 (If UE does not report...)**：
+   如果手机没填这个总上限，那么天花板就直接等于**当前配置给你的实际物理频段总数（$N_{cells}^{DL,NR-DC}$）**。
+   比如你现在总共连了 5 个频段，那么 `MCG份额 + SCG份额 必须 <= 5`。
+
+**生活类比**：
+你是包工头（UE 基带），手下有两支施工队（MCG 处理线程和 SCG 处理线程）。
+甲方（网络侧）每天给两支施工队分别派任务量（pdcch-BlindDetection 配额）。
+* 如果你签合同前声明过：“我总共只有 80 个人”（上报了能力值）。那甲方给两边派的任务量加起来，绝对不能超过 80 人的工作量。
+* 如果你没声明总人数，甲方就看今天总共给你开了几个工地（实际物理频段数，比如 5 个），那派给你的总任务配额，加起来绝对不能超过 5 个标准工地的工作量。
+
+### 🔄 NR-DC 配额下发的合规性检查图
+```text
+【网络给 NR-DC 手机下发 MCG 和 SCG 的算力配额】
+         │
+         ├─► [MCG 配额] = X
+         ├─► [SCG 配额] = Y
+         │
+【手机收到配置后的底层自检 (UE Expects)】
+         │
+         ├─ 算出总和: Sum = X + Y
+         │
+         ├─ 寻找我的天花板 Limit：
+         │    ├── 我上报过总能力值 C 吗？ ──► 天花板就是 C
+         │    └── 没上报过？ ────────────► 天花板就是当前的物理小区总数 N_total
+         │
+         └─► 【进行判定】: Sum 必须 <= Limit！
+             (如果违反此定律，基站配置严重非法，手机物理层状态机将产生异常甚至拒配)
+```
+
+### 💡 章节硬核总结
+
+**本段协议在 RRC 配置层面对 NR-DC 架构下的 PDCCH 盲检预算切片（Budget Partitioning）施加了全局的代数约束（Algebraic Constraint）。它通过 `UE expects` 原语建立了闭环的 L1 合规性校验机制，确保网络侧配置给 MCG 和 SCG 的逻辑算力配额之和（$\Sigma$ pdcch-BlindDetection），绝对不溢出终端底层的物理算力水池（Budget Pool）。该水池的容量取决于 UE 能力上报状态：显式上报场景下受控于 `pdcch-BlindDetectionCA` 标量；隐式场景下受控于实际激活的 DL Cells 总数。这一守恒定律从系统设计源头切断了因 MCG 和 SCG 独立 RRC 实体缺乏算力统筹而导致配置出 UE 基带“不可解（Infeasible）”状态的风险。**
+
+## 📖 协议原文拆解 (二十五)：手机主动要求“偏心”分配算力 (非对称双连接预算上报)
+
+> **协议原文**
+> For NR-DC operation, the UE may indicate, through pdcch-BlindDetectionMCG-UE and pdcch-BlindDetectionSCG-UE, respective maximum values for pdcch-BlindDetection for the MCG and pdcch-BlindDetection for the SCG.
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionMCG-UE**：终端期望的 MCG 盲检能力上限。**一句话解释**：手机主动告诉基站：“我这颗芯片的结构，分给主基站（MCG）这边的处理能力最多只有这么大。”
+* **pdcch-BlindDetectionSCG-UE**：终端期望的 SCG 盲检能力上限。**一句话解释**：同理，手机告诉基站：“我分给辅基站（SCG）那边的处理能力最多只有那么大。”
+
+### 🚪 第一关：手机也有硬件设计的“偏科”
+前面讲过，在 NR-DC 双连接下，网络需要给 MCG 和 SCG 分配盲检算力配额，并且总和不能超标。
+但如果网络把所有的算力都砸给 MCG，或者全砸给 SCG，行不行？
+**对某些手机来说，不行！**
+
+因为有的手机在设计底层基带芯片时，负责处理 MCG 和 SCG 信号的是两块物理上独立的硬件模块（或者资源池划分不均衡）。
+比如手机的总算力是 10，但 MCG 模块的硬件上限是 7，SCG 模块的硬件上限是 5。
+这时候，如果网络非常极端地给 MCG 强行分配了 9 的配额（9 + 1 = 10，虽然总和没超标），手机的 MCG 硬件模块也会瞬间被撑爆。
+
+### 🎯 第二关：主动亮明“木桶的短板”
+为了防止网络这种“极端偏心”的分配导致局部硬件崩溃，协议允许手机（`may indicate`）主动向网络亮出自己两块硬件的局部底牌：
+* 通过上报 `pdcch-BlindDetectionMCG-UE`，锁死主基站这边能接单的绝对上限。
+* 通过上报 `pdcch-BlindDetectionSCG-UE`，锁死辅基站那边能接单的绝对上限。
+
+**生活类比**：
+你（UE）承包了一个项目（NR-DC），手下有 A、B 两个施工队。
+你上报总公司：“我这包工头总共能抗 100 人的工作量（总能力 `pdcch-BlindDetectionCA`）。”
+但为了防止总公司瞎派活，你补充了一个极其重要的声明：“请注意，虽然我总共能抗 100 人，但我 A队 最多只能塞 70 人进去（`MCG-UE` 上限），B队 地方小最多只能塞 50 人进去（`SCG-UE` 上限）。你给我分配两边任务的时候，不仅总和不能超 100，各自分配的数量也不能超过它们各自的容量上限！”
+
+### 🔄 NR-DC 算力双向挤压图
+```text
+【基站给手机下发 MCG 和 SCG 的算力配额】
+
+必须同时满足以下所有红线：
+
+  红线 1 (上一段讲的全局总账):
+  [MCG配额] + [SCG配额] <= 手机的总承载力 (如 10)
+
+  红线 2 (本段补充的局部木桶效应):
+  [MCG配额] 必须 <= 手机上报的 MCG 局部上限 (如 7)
+  [SCG配额] 必须 <= 手机上报的 SCG 局部上限 (如 5)
+
+(只有在这重重数学约束下算出来的配额，才不会烧毁基带)
+```
+
+### 💡 章节硬核总结
+
+**本段协议在 L1 盲检能力上报机制中引入了“局部硬边界（Local Hard Boundaries）”的概念。这主要针对部分 UE 基带架构在实现 NR-DC 时，可能采用了非对称的双 DSP/FPGA 核心簇，导致 MCG 和 SCG 的译码资源池并非完全动态共享的情况。通过允许 UE 显式暴露 `pdcch-BlindDetectionMCG-UE` 和 `SCG-UE` 这两个子上限标量，协议在之前 $X+Y \le Z$ 的全局代数约束之上，补充了 $X \le X_{max}$ 与 $Y \le Y_{max}$ 的局部非对称极值约束。这一反馈链路使得基站的 RRC 统筹实体在执行跨节点预算切片时，能够精准避开终端硬件管线的物理瓶颈区域。**
+
+## 📖 协议原文拆解 (二十六)：局部上限不仅要有，还得“加起来溢出”才能容错
+
+> **协议原文**
+> If the UE reports pdcch-BlindDetectionCA,
+> - the value range of pdcch-BlindDetectionMCG-UE or of pdcch-BlindDetectionSCG-UE is [1, …, pdcch-BlindDetectionCA-1], and
+> - pdcch-BlindDetectionMCG-UE + pdcch-BlindDetectionSCG-UE >= pdcch-BlindDetectionCA.
+> Otherwise, if $N_{cells}^{DL,NR-DC,max}$ is a maximum total number of downlink cells that the UE can be configured on both the MCG and the SCG for NR-DC as indicated in UE-NR-Capability,
+> - the value range of pdcch-BlindDetectionMCG-UE or of pdcch-BlindDetectionSCG-UE is [1, 2, 3], and
+> - pdcch-BlindDetectionMCG-UE + pdcch-BlindDetectionSCG-UE >= $N_{cells}^{DL,NR-DC,max}$.
+
+### 📚 增量术语表
+* **$N_{cells}^{DL,NR-DC,max}$**：最大支持双连接下行小区总数。**一句话解释**：如果没有上报专门的盲检总数参数，这代表手机硬件最多能同时吃下几个下载通道（频段），通常高端机可能是 4 个甚至更多。
+
+### 🚪 第一关：手机在填报“局部上限”时的数值范围约束
+上一段讲了手机可以主动向基站上报 MCG 和 SCG 各自的局部算力天花板。
+这段协议直接对手机填报的**数值**做出了严格的代数约束，分为两类手机：
+
+**1. 上报了全局总算力 (`pdcch-BlindDetectionCA`) 的手机：**
+* **个体范围**：MCG 或 SCG 任何一边的局部上限，必须在 `1` 到 `总算力-1` 之间。不能填 0（说明不支持双连接了），也不能填满总算力（得给另一边留至少 1 个小区的活路）。
+
+**2. 没上报全局总算力，只报了支持几个物理载波的手机：**
+* **个体范围**：被死死限制在 `[1, 2, 3]` 这三个数值里。为什么？因为对于这种没有专门填算力表的手机，协议默认它的双连接总承载力极有可能只有小几个小区，直接物理封顶在 3 个以内，避免基站被误导。
+
+### 🎯 第二关：极其反直觉的“大于等于 (>=)”定式！
+这是本段协议的精髓！请看这两个公式：
+* 局部上限M + 局部上限S **>=** 总算力！
+
+等一下，我们之前不是说“分配的配额加起来不能超过总算力（**<=**）”吗？
+**注意区分：**
+* 之前讲的 **<=**，是**基站实际给你派活（配置参数）**时，加起来不能超过你的极限。
+* 这里讲的 **>=**，是**手机在汇报自身硬件能力上限（Capability）**时，两个局部上限加起来，必须**溢出**你的全局总算力！
+
+**为什么要“溢出”？（物理意义与资源池共享）**
+这是为了给基站的调度器提供**极大的动态弹性空间**！
+假设手机的总算力是 10。如果手机上报 MCG 上限是 5，SCG 上限是 5（5+5=10）。那么基站**唯一**的分配方式只能是：MCG 5 个，SCG 5 个。基站想多给 MCG 分配一点都不行。
+如果手机上报 MCG 上限是 8，SCG 上限是 7（8+7=15 >= 10，成功溢出！）。
+这就意味着手机的两个硬件模块实际上是有很多**共享资源池**的。这种汇报方式告诉基站：“我总共只能接 10 个活，但你可以**非常灵活**地调配！你可以给主基站派 8 个，辅基站派 2 个；也可以给主基站 3 个，辅基站 7 个。只要你保证最后总和是 10 就行！”
+
+**生活类比**：
+一个大型宴会厅（UE 总能力，可容纳 100 席）。
+它有东厅（MCG 硬件）和西厅（SCG 硬件），中间有**活动屏风**。
+你向公安局（基站）报备安全容量：
+* 你绝不能说：“东厅最多容纳 50 席，西厅最多容纳 50 席。”（太死板，客人来了没法动态调整）。
+* 协议要求你必须这么报：“我的东厅拉开屏风最多能容纳 80 席，我的西厅拉开屏风最多能容纳 70 席。**但是（总控）无论你怎么摆，整个宴会厅总数绝对不能超过 100 席！**”
+这里的 $80+70 \ge 100$，就是本段协议里极其高明的动态余量设计。
+
+### 🔄 局部上限“溢出汇报”逻辑图
+```text
+【手机向网络提交的能力清单】
+
+  全局总能力 (pdcch-BlindDetectionCA) = 10 
+
+  ├─ 填报 MCG 局部能力 (pdcch-BlindDetectionMCG-UE) = 8
+  └─ 填报 SCG 局部能力 (pdcch-BlindDetectionSCG-UE) = 7
+
+【协议核查机制】
+  检查一：都在 [1 到 10-1=9] 的范围内吗？ ──► (8和7都符合) ✅
+  检查二：8 + 7 >= 10 成立吗？ ──────────────► (15 >= 10) ✅
+
+(手机合规！这种“加起来大于总数”的上报，为基站跨基站资源分配赋予了极强的弹性)
+```
+
+### 💡 章节硬核总结
+
+**本段协议在 UE 能力上报规则中，植入了极具动态统筹哲学的 L1 约束不等式：$\Sigma (SubCapacity_{max}) \ge Capacity_{total}$。在 NR-DC 架构下，终端的基带处理引擎往往存在跨 DSP core/Thread 的软硬件资源复用池（Resource Pooling）。如果硬性规定局部能力上限之和等于全局总能力，将导致 RRC 配置被锁死在唯一的切分比例上，抹杀了调度器的拓扑弹性。协议通过强制要求两个 Sub-Capacity 的代数和必须大于或等于全局 Capacity，在信令层面揭示并映射了基带硬件底层的软共享（Soft-sharing）边界。这给予了网络侧在分配 $N_{cells}^{MCG}$ 和 $N_{cells}^{SCG}$ 权重时充足的游走空间（Sliding window），只要最终下发的实际配置之和满足上一节的 $\le$ 总容量红线即可。**
+
+## 📖 协议原文拆解 (二十七)：极速模式下的“双黄线”与严格体检 (R16 算力申报)
+
+> **协议原文**
+> If a UE indicates in UE-NR-Capability a carrier aggregation capability larger than two downlink cells, the UE includes in UE-NR-Capability an indication for a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs that the UE can monitor per span when the UE is configured for carrier aggregation operation over more than two downlink cells with monitoringCapabilityConfig = r16monitoringcapability. When a UE is not configured for NR-DC operation and the UE is provided monitoringCapabilityConfig = r16monitoringcapability for all downlink cells where the UE monitors PDCCH, the UE determines a capability to monitor a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs per span that corresponds to $N_{cells}^{cap-r16}$ downlink cells, where
+> - $N_{cells}^{cap-r16}$ is the number of configured downlink cells if the UE does not provide pdcch-MonitoringCA
+> - otherwise, $N_{cells}^{cap-r16}$ is the value of pdcch-MonitoringCA
+
+### 📚 增量术语表
+* **r16monitoringcapability**：R16 盲检能力。**一句话解释**：之前提过的 URLLC 超低延迟模式，算账周期从“按天结 (per slot)”变成了“按极短的小时结 (per span)”。
+* **pdcch-MonitoringCA**：R16 专属载波聚合能力值。**一句话解释**：手机针对极速 Span 模式专门上报的“瞬时爆发算力上限”，对应常规模式下的 `pdcch-BlindDetectionCA`。
+* **$N_{cells}^{cap-r16}$**：R16 模式下的总盲检天花板。**一句话解释**：在这个极短的 Span 时间内，手机芯片最多能同时抗住几个当量小区的并发解密任务。
+
+### 🚪 第一关：警戒线大幅收紧！从“超 4”降到“超 2”
+还记得我们在（二十二）段拆解的常规模式吗？在传统的“按天结 (per slot, R15)”模式下，手机同时连 **4 个**载波以上，协议才要求它必须上报算力专项体检报告。
+
+但这段协议专门针对**极速模式 (R16, per span)** 制定了新规矩：警戒线直接对半砍！
+**只要手机吹牛说自己能同时支持超过 2 个下行小区 (larger than two downlink cells)**，它就必须立刻在简历里附上它在 Span 极短时间内的极限能力（最多解几张纸条、看几个格子）。
+
+**为什么要收紧警戒线？（物理意义）**
+因为 R16 的 per span 是针对工业控制、自动驾驶等高压业务设计的。在一个极短的 Span（比如只有 2 个 OFDM 符号，几十微秒）内，如果要同时并发处理 3 个小区传来的 DCI，对底层解码芯片（Polar译码器）瞬时吞吐量的压榨是极其恐怖的，瞬间功耗极大，极易导致硅片“热熔断”。所以，警戒线必须极其严苛。
+
+**生活类比**：
+常规业务（R15 per slot）就像是**工地搬砖**，要求一天交一次工。老板（基站）给你派 4 个工地的活，你还可以自己统筹安排、偷偷摸鱼，超过 4 个工地才需要专项审批。
+极速业务（R16 per span）就像是**高危拆弹**，要求几分钟内必须搞定！只要老板让你同时盯**超过 2 个**定时炸弹，你就必须立刻向上级提交书面的《脑力极限测试报告》，明确说出你在几分钟内到底能剪断几根线，绝不能盲目接单！
+
+### 🎯 第二关：核定极速模式下的算力天花板
+如果手机运行在普通组网（非双连接），基站该怎么确定它在 Span 模式下的算力天花板 $N_{cells}^{cap-r16}$ 呢？
+协议给出了和 R15 非常相似的判定树，但专属参数换了：
+1. **老实填了专项报告的**：如果手机明确上报了 `pdcch-MonitoringCA`，那太好了，基站直接把这个值作为排班的天花板（otherwise 分支）。
+2. **没填专项报告的**：基站直接把“当前给你配置了几个实际下行物理小区”，作为你的天花板。比如给你配了 3 个小区，那你就是 3。基站在排班时不能超过这个量。
+
+### 🔄 R16 极速模式下的算力核算树
+```text
+【一台手机入网，声明支持 3 个下行载波 (CA > 2)，且激活了 per-span 极速模式】
+
+ 触发高危警戒线！手机必须在 UE-NR-Capability 中上报极速盲检上限！
+
+ 基站开始核算它的极速承载能力 N_cells_cap_r16：
+        │
+        ├─► 手机在报告里主动填了专属参数 pdcch-MonitoringCA 吗？
+        │
+        ├──► 【填了，值为 4】
+        │       └─► 算力天花板锁定 = 4！基站在单次 Span 派发的任务量绝不能超标。
+        │
+        └──► 【没填】
+                └─► 启动保守回退机制：当前给你实际配了几个小区？
+                    配了 3 个，那天花板锁定 = 3！
+```
+
+### 💡 章节硬核总结
+
+**本段协议是 3GPP 针对 Rel-16 URLLC 特性（`monitoringCapabilityConfig = r16monitoringcapability`）在 L1 物理层引入的专门化 Overbooking 防御机制。相较于 eMBB per-slot 盲检（其 CA 门限为 >4 cells），URLLC per-span 盲检的 L1 基带瞬时峰值处理压力（Peak Processing Payload）呈指数级上升。因此，协议在 RRC 能力信令中采取了更为严苛的预防性截断（Preventive Truncation）：强制将显式能力上报门限降低至 `CA > 2`。同时，独立开辟了专门用于衡量亚时隙（Sub-slot）算力深度的标量 $N_{cells}^{cap-r16}$ 及其对应的参数 `pdcch-MonitoringCA`。这种在协议规格上对业务类型物理特性的极致隔离，是 5G 能够在同一套空口协议上同时完美支撑大带宽与极低延迟的前提。**
+
+## 📖 协议原文拆解 (二十八)：极速双连接下的“专项资产分割” (R16 NR-DC 分配)
+
+> **协议原文**
+> When a UE is configured for NR-DC operation and the UE is provided monitoringCapabilityConfig = r16monitoringcapability for all downlink cells where the UE monitors PDCCH, the UE determines a capability to monitor a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs per span that corresponds to
+> - $N_{cells}^{cap-r16} = N_{cells,r16}^{MCG}$ downlink cells for the MCG where $N_{cells,r16}^{MCG}$ is provided by pdcch-BlindDetection2 for the MCG, and
+> - $N_{cells}^{cap-r16} = N_{cells,r16}^{SCG}$ downlink cells for the SCG where $N_{cells,r16}^{SCG}$ is provided by pdcch-BlindDetection2 for the SCG
+
+### 📚 增量术语表
+* **pdcch-BlindDetection2**：R16 第二代 PDCCH 盲检能力分配值。**一句话解释**：这是为了极速模式（per span）专门发明的新参数。和之前普通模式用的 `pdcch-BlindDetection` 彻底分开，专款专用。
+* **$N_{cells,r16}^{MCG}$ / $N_{cells,r16}^{SCG}$**：极速模式下主/辅基站各自的配额。**一句话解释**：主基站和辅基站各自拿到的一笔“高爆发算力预算”。
+
+### 🚪 第一关：新业务必须用“新账本”
+在前面的（二十三）段，我们学过手机如果在双连接（NR-DC）模式下，算力必须在 MCG 和 SCG 之间分家，当时用的是 `pdcch-BlindDetection` 这个老参数。
+但现在手机接的是**极速、超低延迟的 URLLC 业务**（`r16monitoringcapability`，按 Span 极短时间结账）。
+协议的原则是：“专款专用，账本解耦”。
+对于极速模式的分家，网络不能再用老参数来分了，必须下发一个全新的参数——**`pdcch-BlindDetection2`**（注意后面的那个数字 "2"，它标志着这是专属于 R16 Span 模式的第二代分配指令）。
+
+### 🎯 第二关：双基站“极速算力”的物理隔离
+手机根据基站下发的这个“第二代账本”，明确算出自己在极短的瞬时时间内（Span），对两边基站的极限抗压能力：
+* **主基站 (MCG) 侧**：天花板 $N_{cells}^{cap-r16}$ 锁定为网络通过 `pdcch-BlindDetection2` 专门批给 MCG 的配额。
+* **辅基站 (SCG) 侧**：天花板 $N_{cells}^{cap-r16}$ 锁定为网络通过 `pdcch-BlindDetection2` 专门批给 SCG 的配额。
+
+**为什么要分出 "第二代账本"？（物理意义）**
+这是由于硬件架构的异构性决定的。一部 5G 手机，它用来处理常规业务（一天处理一回，长时延）的译码器集群，和它用来处理极速业务（几十微秒必须出结果，高爆发）的硬件加速器（Accelerators）甚至 SRAM 缓存大小是完全不同的。
+因此，手机必须在软件信令层面（RRC）拥有**两套完全独立切分的算力水池**。网络可以给 MCG 的常规业务分配很大，但给 MCG 的极速业务分配得很小，互不干扰，防止底层调度出现逻辑灾难。
+
+### 🔄 R16 极速双连接算力切分图
+```text
+【手机处于 NR-DC (双基站) 且全网开启 URLLC 极速盲检 (per Span)】
+
+      网络下发第二代算力切分方案 (pdcch-BlindDetection2)
+                     │
+         ┌───────────┴───────────┐
+         ▼                       ▼
+   [拨给 主基站 MCG]         [拨给 辅基站 SCG]
+         │                       │
+ 锁定为 MCG 的极速天花板     锁定为 SCG 的极速天花板
+ (MCG 瞬时盲检绝不可越线!)  (SCG 瞬时盲检绝不可越线!)
+
+*(注：这套极速天花板与之前的常规天花板并行存在，手机底层硬件同时监控两套红线)*
+```
+
+### 💡 章节硬核总结
+
+**本段协议在 5G NR-DC (Multi-Radio Dual Connectivity) 架构下，针对 Rel-16 的亚时隙级（Sub-slot/per-span）PDCCH 盲检特性，完成了一次教科书级的参数解耦（Parameter Decoupling）。为了在双节点并发调度的恶劣环境中保护 UE 基带中极高功耗、极低延迟的专属硬件加速器流水线不被瞬间冲垮，协议在此引入了全新域名的 IE 字段 `pdcch-BlindDetection2`。该字段独立于传统的 per-slot 切分参数，专门用于在 RRC 层静态划分 MCG 与 SCG 在微秒级 Span 时间窗内的 Peak Decoding Capacity 预算。这一分离设计极大地增强了网络规划的前向兼容性，使得运营商可以对不同 Cell Group 承载 eMBB 与 URLLC 业务的能力进行完全正交的精细化配置。**
+
+## 📖 协议原文拆解 (二十九)：极速模式下的最后通牒 (R16 算力红线警告)
+
+> **协议原文**
+> When the UE is configured for carrier aggregation operation over more than 2 cells, or for a cell group when the UE is configured for NR-DC operation, the UE does not expect to monitor per span a number of PDCCH candidates or a number of non-overlapped CCEs that is larger than the maximum number as derived from the corresponding value of $N_{cells}^{cap-r16}$.
+
+### 📚 增量术语表
+* **$N_{cells}^{cap-r16}$**：R16 极速模式算力天花板。**一句话解释**：手机在几十微秒的瞬间（一个 Span），最多能同时抗住几个小区的盲检任务量。
+* **does not expect**：不预期（最高警告）。**一句话解释**：物理层给基站排班系统画的“高压电网”。基站若敢越过此线，手机直接罢工。
+
+### 🚪 第一关：收网！所有极速算力合并入“红线”判决
+前两段（27段和28段），协议分别教了在**单基站多载波（CA>2）**和**双基站（NR-DC）**两种复杂情况下，手机该怎么算出这个极其金贵的极速天花板参数 $N_{cells}^{cap-r16}$。
+这段话是对这两部分内容的一个**终极法律收口**。
+
+### 🎯 第二关：“微秒级”的罢工权 (Per Span 保护)
+和常规模式（Per Slot，一天算一次账）不同，这里强调的是在**极短的瞬间（per span）**内的绝对保护。
+协议向基站下达最后通牒：
+不论你是通过载波聚合（CA）给手机塞了超多频段，还是通过双基站（NR-DC）给手机两头派活。只要你配置的是极速模式（R16），**在任何一个极短的 Span 瞬间内**，你实际丢给手机去解密的纸条总数（Candidates）和扫视的黑板总面积（CCEs），**绝对不允许**超过从 $N_{cells}^{cap-r16}$ 算出来的理论物理极限值！
+
+**物理意义**：
+在微秒级的时间刻度上，电子芯片是没有“喘息”空间的。如果基站排班出错，导致某个瞬间让手机解码的次数超过了其内部译码器阵列（Decoder Array）的物理并行上限，会导致数据堆积在寄存器里溢出，直接造成整个 URLLC 链路的灾难性断裂。
+`does not expect` 赋予了手机在这种极端压榨下**直接抛弃超额任务**的自卫权利。
+
+### 🔄 极速模式防过载终极逻辑环
+```text
+【URLLC 极速盲检 (Per Span) 过载防御机制】
+
+ 算出手机的极速天花板 N_cells_cap_r16 (无论是算出来的，还是网络下发的配额)
+        │
+        ▼
+ 【进入实战盲检：在一个仅包含比如 2 个符号的极短 Span 内】
+        │
+        ├─► 基站实际派发的 纸条总数(Candidates) 超标了吗？
+        │      ├──► 超标 ──► 🚨 触发 [does not expect] 罢工异常！
+        │      └──► 没超 ──► 继续检查
+        │
+        └─► 基站实际派发的 黑板面积(CCEs) 超标了吗？
+               ├──► 超标 ──► 🚨 触发 [does not expect] 罢工异常！
+               └──► 没超 ──► ✅ 安全！手机芯片火力全开，成功解析本次极速调度。
+```
+
+### 💡 章节硬核总结
+
+**本段协议是整个 5G Rel-16 URLLC (Ultra-Reliable Low-Latency Communication) 物理层在控制信道维度的最终防线（Ultimate Failsafe Boundary）。在将时域颗粒度从毫秒级的 Slot 暴力压缩至亚毫秒（甚至是几十微秒）级的 Span 后，基站调度器（Scheduler）极易因为多载波（CA > 2）或跨节点（NR-DC）调度的非完美协同，引发瞬时盲检负荷越限（Instantaneous Overbooking）。在此，3GPP 再次亮出了无敌的 `UE does not expect` L1 原语，强行要求基站侧的调度算法必须具备前向资源预算（Forward Resource Budgeting）能力，确保在任何物理 Span 切片内的 Candidates 与 CCEs 积分值严守 $N_{cells}^{cap-r16}$ 衍生出的数学极限。这不仅免去了终端侧实现复杂丢弃逻辑的成本，更从根本上保障了低延迟业务不可妥协的可靠性要求。**
+
+## 📖 协议原文拆解 (三十)：极速双连接的“算力守恒定律” (R16 配额合规检查)
+
+> **协议原文**
+> When a UE is configured for NR-DC operation with a total of $N_{cells}^{DL,NR-DC}$ downlink cells on both the MCG and the SCG and the UE is provided monitoringCapabilityConfig = r16monitoringcapability for all downlink cells where the UE monitors PDCCH, the UE expects to be provided pdcch-BlindDetection2 for the MCG and pdcch-BlindDetection2 for the SCG with values that satisfy
+> - pdcch-BlindDetection2 for the MCG + pdcch-BlindDetection2 for the SCG <= pdcch-MonitoringCA, if the UE reports pdcch-MonitoringCA, or
+> - pdcch-BlindDetection2 for the MCG + pdcch-BlindDetection2 for the SCG <= $N_{cells}^{DL,NR-DC}$, if the UE does not report pdcch-MonitoringCA
+
+### 📚 增量术语表
+* **monitoringCapabilityConfig = r16monitoringcapability**：全网极速盲检模式。**一句话解释**：手机同时连着主辅两个基站，而且基站明确要求手机在所有下行通道上，全部挂上“按小时结（per span）”的高爆发档位。
+
+### 🚪 第一关：旧壶装新酒，极速模式下的“家产分割法”
+在第（二十四）段，我们拆解过普通模式（per slot）下双基站如何分算力：主辅基站的份额加起来不能超过总天花板。
+这段协议的逻辑和（二十四）段**完全一模一样**，唯一的区别是：**参数全部换成了针对极速模式（R16 URLLC）的“第二代专属参数”。**
+
+协议再次强调了基站下发极速算力配额时的**“能量守恒定律”**：
+基站给主基站（MCG）发的极速配额 (`pdcch-BlindDetection2`) 加上给辅基站（SCG）发的极速配额 (`pdcch-BlindDetection2`)，**加在一起的总和，绝对不能把手机撑爆！**
+
+### 🎯 第二关：极速天花板到底多高？(两条分支)
+这个防爆的天花板怎么定？依然是看手机入网时递交的简历：
+1. **写了极速专项体检报告的** (If UE reports `pdcch-MonitoringCA`)：
+   如果手机明确填了专属的极速模式天花板参数，那么：
+   `MCG 第二代配额 + SCG 第二代配额 必须 <= 这个专项上报值`。
+
+2. **没写极速专项体检报告的** (If UE does not report...)：
+   如果手机偷懒没填，那基站就用最简单粗暴的方法：当前手机总共连了几个物理频段（$N_{cells}^{DL,NR-DC}$），天花板就是几。
+   `MCG 第二代配额 + SCG 第二代配额 必须 <= 总物理频段数`。
+
+**生活类比**：
+你在双轨制赛车俱乐部打工。
+以前开普通赛车（普通模式 pdcch-BlindDetection），老板给你主辅两个赛道分的任务量总和不能超过你的普通驾照级别。
+现在你升级到了**F1极速赛车**（极速模式 pdcch-BlindDetection2）。老板给你主辅两个极速赛道分的任务量，总和同样绝对不能超过你的**F1高级驾照级别（pdcch-MonitoringCA）**！如果你没考高级驾照，那老板就按你现在租了几条赛道来死板地给你设上限。
+
+### 🔄 R16 极速模式配额合规性检查图
+```text
+【全网开启 R16 URLLC 极速模式下的双连接 (NR-DC) 配额下发】
+
+         ├─► [MCG 第二代配额] = A
+         ├─► [SCG 第二代配额] = B
+         │
+【手机物理层底层拦截与自检 (UE Expects)】
+         │
+         ├─ 算出极速总负荷: Sum = A + B
+         │
+         ├─ 寻找我的极速天花板 Limit：
+         │    ├── 我上报过专属极速能力 pdcch-MonitoringCA 吗？ ──► 有，天花板就是它
+         │    └── 没上报过？ ───────────────────────────────► 没，天花板就是实际总频段数
+         │
+         └─► 【进行生死判定】: Sum 必须 <= Limit！
+             (基站若违反此极速守恒定律，手机基带将拒绝应用该配置)
+```
+
+### 💡 章节硬核总结
+
+**本段协议在数学逻辑上完美复刻了基础 eMBB (per-slot) 场景下的双连接资源守恒方程，但其作用域被严格且精细地隔离在了 Rel-16 的 Sub-slot (per-span) 高维空间内。在异构网络调度中，物理层参数的名称空间隔离（Namespace Isolation）至关重要。通过使用带有 `2` 后缀或专属 `r16` 标记的新 IE (Information Element) 字段，3GPP 确保了基站侧的 RRC 配置器 (Configurator) 与终端侧的基带核算状态机 (Accounting State Machine) 能够在 eMBB 和 URLLC 两种完全不同特征的时域尺度上，分别运行互不干扰的 Overbooking 校验准则。这种将宏观拓扑逻辑与微观物理参量正交解耦的设计，是 5G 协议能够像搭积木一样无限平滑演进的底层密码。**
+
+## 📖 协议原文拆解 (三十一)：极速模式下的“偏科”上报 (R16 局部上限声明)
+
+> **协议原文**
+> When a UE is configured for NR-DC operation and the UE is provided monitoringCapabilityConfig = r16monitoringcapability for all downlink cells where the UE monitors PDCCH, the UE may indicate, through pdcch-BlindDetectionMCG-UE-r16 and pdcch-BlindDetectionSCG-UE-r16, respective maximum values for pdcch-BlindDetection for the MCG and pdcch-BlindDetection for the SCG.
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionMCG-UE-r16 / pdcch-BlindDetectionSCG-UE-r16**：R16 版终端期望的主/辅基站盲检能力上限。**一句话解释**：手机针对极速 Span 模式，专门向基站亮出的“我分给主基站的极速处理模块最大有多强”、“我分给辅基站的极速处理模块最大有多强”的两张底牌。
+
+### 🚪 第一关：旧套路，新马甲 (极速硬件的局部瓶颈)
+这段话读起来也非常眼熟。在第（二十五）段中，我们见过普通模式下手机上报局部瓶颈的机制（MCG-UE 和 SCG-UE）。
+现在到了极速模式（R16 per span），逻辑是完全映射的，只是加上了 **`-r16`** 的专属后缀。
+由于处理极速 URLLC 业务的硬件加速器（Accelerators）在手机芯片内部往往是独立划分资源的。有些手机可能给主基站（MCG）分配了大量的极速译码核心，而给辅基站（SCG）只留了一点点。
+为了防止网络在派发极速任务时“偏心偏到短板上”，手机必须（`may indicate`）主动交代这些极速硬件模块的真实局部上限。
+
+### 🎯 第二关：双轨制并行上报的严谨性
+请注意协议在这里的一个小瑕疵/细节：
+原文后半句写的是 `respective maximum values for pdcch-BlindDetection...`。按照严谨的协议演进逻辑，这里其实应该是指约束前文刚刚定义的第二代参数 `pdcch-BlindDetection2`。
+但核心精神是明确的：**只要是在极速 `r16` 语境下，手机上报的所有局部瓶颈约束，都是通过带有 `-r16` 后缀的专属 RRC 信令来完成的。**
+这保证了普通业务和极速业务在上报自己“能吃几碗饭”时，用的是完全不同的两张表，互不干扰。
+
+**生活类比**：
+你在双轨制公司（NR-DC）打工。
+以前送普通快递（普通盲检），你报过一次工时底线：“我最多给东区（MCG）跑 7趟，西区（SCG）跑 5趟。”
+现在公司开通了“10分钟加急闪送”（R16 极速盲检）。
+你不能用以前的底线来糊弄，你必须专门递交一份《闪送体力极限量表（带 -r16 后缀）》：“报告老板，如果是跑这种要命的加急件，我给东区最多跑 4趟，西区最多跑 2趟。请按这个新的上限给我派加急件！”
+
+### 🔄 极速模式双基站配额的局部枷锁图
+```text
+【手机的 URLLC (极速) 硬件资源池划分】
+
+   [极速总算力池 pdcch-MonitoringCA]
+
+   ├─► [MCG 极速硬件切片] ── 上报局部瓶颈 pdcch-BlindDetectionMCG-UE-r16
+   │
+   └─► [SCG 极速硬件切片] ── 上报局部瓶颈 pdcch-BlindDetectionSCG-UE-r16
+
+【基站派发极速任务时的合规审查】
+  基站给 MCG 派的极速活，绝不能超过手机上报的 MCG-r16 瓶颈！
+  基站给 SCG 派的极速活，绝不能超过手机上报的 SCG-r16 瓶颈！
+```
+
+### 💡 章节硬核总结
+
+**本段协议在 RRC 信令层面彻底补齐了 Rel-16 极速盲检架构（per-span PDCCH monitoring）的能力上报闭环。正如常规模式下的 `MCG-UE` 和 `SCG-UE` 保护了 eMBB 译码流水线，带 `-r16` 后缀的全新 capability indicators 保护了 UE 内部极其昂贵的低延迟硬件资源（如专门用于极速极化译码的 Fast-Polar Decoder 实例）。这种彻底的 Namespace（命名空间）分离，使得 UE 可以向网络如实反映其底层硅片在处理常态流量与短脉冲流量时完全异构的瓶颈分布（Bottleneck distribution），从而避免了基站在 NR-DC 这种缺乏毫秒级协同的松耦合架构下，意外打爆某一个特定无线电承载的瞬时算力。**
+
+## 📖 协议原文拆解 (三十二)：极速模式下的“溢出汇报”与极其严苛的缺省惩罚
+
+> **协议原文**
+> If the UE reports pdcch-MonitoringCA,
+> - the value range of pdcch-BlindDetectionMCG-UE-r16 or of pdcch-BlindDetectionSCG-UE-r16 is [1, …, pdcch-MonitoringCA-1], and
+> - pdcch-BlindDetectionMCG-UE-r16 + pdcch-BlindDetectionSCG-UE-r16 >= pdcch-MonitoringCA.
+> Otherwise, if $N_{cells}^{DL,NR-DC,max,r16}$ is a maximum total number of downlink cells for which the UE is provided monitoringCapabilityConfig = r16monitoringcapability and the UE is configured on both the MCG and the SCG for NR-DC as indicated in UE-NR-Capability
+> - the value of pdcch-BlindDetectionMCG-UE-r16 or of pdcch-BlindDetectionSCG-UE-r16 is 1,
+> - pdcch-BlindDetectionMCG-UE-r16 + pdcch-BlindDetectionSCG-UE-r16 >= $N_{cells}^{DL,NR-DC,max,r16}$.
+
+### 📚 增量术语表
+* **$N_{cells}^{DL,NR-DC,max,r16}$**：极速双连接最大下行物理小区总数。**一句话解释**：如果没有上报极速算力总值，这就是手机在极速模式（R16 per span）下，双连接所能挂载的物理天线频段总数。
+
+### 🚪 第一关：旧瓶装新酒，极速资源池的“动态溢出”
+这段话的前半部分，和我们在第（二十六）段讲的常规模式上报规则在数学形式上一模一样。
+对于那些主动上报了“极速总算力（`pdcch-MonitoringCA`）”的好学生：
+* 个体配额不能是 0，也不能独占全部（给另一边留条活路）。
+* **最核心的溢出定理**：`MCG极速上限 + SCG极速上限 >= 极速总算力`！
+这个大于等于（$\ge$）再次证明了：即使是极速硬件，手机芯片内部的主辅基站模块依然存在**资源池共享（Resource Pooling）**。通过溢出上报，赋予了基站跨基站动态倾斜分配极速任务的灵活性。
+
+### 🎯 第二关：极其严苛的“缺省惩罚” (数值被死死锁在 1)
+协议的后半部分（Otherwise分支）露出了獠牙！请对比一下常规模式：
+* 常规模式下（第26段），如果没报总能力，局部上限的范围好歹还是 `[1, 2, 3]`。
+* **在极速模式下（本段），如果没报总能力，局部上限的值直接被死死锁死在 `1`！没得选！**
+
+**为什么要施加这么惨烈的惩罚？（物理意义）**
+因为 `r16monitoringcapability`（极速模式）实在太消耗底层硬件资源了！在几十微秒的 Span 时间窗内解密控制信道，对芯片的热量和吞吐量压榨到了极限。
+如果你连一份完整的《极速总算力评估报告》都不交，协议绝对不敢对你有任何高估。为了防止你的基带瞬间烧毁，协议直接对你启动**最底线的自我保护**：无论主基站还是辅基站，你各自局部的最大承载力**强制核定为 1 个当量小区**。哪怕你物理上连了两个频段（1+1 $\ge$ 2 满足不等式），单个基站也绝不能给你派发超过 1 个小区的极速并发任务！
+
+**生活类比**：
+（常规货运）：你不报总装载量，交警看你的车型，允许你在 [1吨, 2吨, 3吨] 里挑一个局部上限来报备。
+（运输烈性炸药 - R16 极速模式）：如果你不提交《特种运输车抗爆总容量认证》，交警直接一刀切：前车厢（MCG）最多只能装 1 箱，后车厢（SCG）最多只能装 1 箱。绝对不允许你报 2 甚至 3，宁可一趟趟跑，也绝对不承担爆炸（芯片烧毁）的风险！
+
+### 🔄 极速模式下的局部算力上报决议树
+```text
+【手机准备上报极速模式 (R16) 的双连接局部算力 MCG-r16 和 SCG-r16】
+
+        ├─► 有没有上报总的极速算力 pdcch-MonitoringCA？
+        │
+        ├──► 【有报 (比如报了 4)】
+        │       └─► 范围宽松：MCG和SCG可以在 [1, 2, 3] 里选。
+        │           条件：两者相加 >= 4 (比如报 2+3 或者 3+2 都可以，提供弹性)
+        │
+        └──► 【没报】
+                └─► 触发底线极速惩罚！
+                    范围锁死：MCG-r16 只能报 1，SCG-r16 只能报 1！
+                    条件：1 + 1 >= 物理小区总数 (意味着此时总物理小区最多只能是 2 个)
+```
+
+### 💡 章节硬核总结
+
+**本段协议在 5G URLLC 极速盲检框架下，完美闭环了 NR-DC 架构的局部能力上报机制，并展示了 3GPP 协议极为谨慎的“Failsafe (防故障)”降级设计。前半段的不等式 $\Sigma (SubCapacity_{max}) \ge Capacity_{total}$ 继续发扬了软资源池共享的调度弹性。而后半段的 Fallback 机制堪称严厉：在缺失明确的极速全局预算 `pdcch-MonitoringCA` 时，协议直接褫夺了 UE 局部能力上报的灵活性，将其强行收敛常量 `1`。这从 L1 数学模型的根源上，物理切断了网络侧在信息不对称情况下向未知极速算力的终端下发高密度并发 DCI 的路径，以最粗暴但最有效的方式保全了基带芯片在极限时序下的稳定性。**
+
+## 📖 协议原文拆解 (三十三)：极高频/低功耗模式下的“摸鱼上限” (R17 算力申报)
+
+> **协议原文**
+> If a UE indicates in UE-NR-Capability a carrier aggregation capability larger than four downlink cells, the UE includes in UE-NR-Capability an indication for a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs that the UE can monitor per group of $X_s$ slots when the UE is configured for carrier aggregation operation over more than four downlink cells for which the UE is provided monitoringCapabilityConfig = r17monitoringcapability. When a UE is not configured for NR-DC operation for all downlink cells where the UE monitors PDCCH, the UE determines a capability to monitor a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs per group of $X_s$ slots that corresponds to $N_{cells}^{cap-r17}$ downlink cells, where
+> - $N_{cells}^{cap-r17}$ is $N_{cells,0}^{DL}+R \cdot N_{cells,1}^{DL}$ if the UE does not provide pdcch-MonitoringCA-r17 where $N_{cells,0}^{DL}+N_{cells,1}^{DL}$ is the number of configured downlink serving cells
+> - otherwise, $N_{cells}^{cap-r16}$ is the value of pdcch-MonitoringCA-r17
+
+*(注：协议原文最后一行的 `$N_{cells}^{cap-r16}$` 应为笔误，逻辑上及根据前文推断，此处必然为 `$N_{cells}^{cap-r17}$`。)*
+
+### 📚 增量术语表
+* **r17monitoringcapability**：R17 盲检能力。**一句话解释**：之前提过的“低碳养生版/极高频版”模式，算账周期变成了“按周结 (per group of $X_s$ slots)”，允许把活摊在好几天里慢慢干。
+* **pdcch-MonitoringCA-r17**：R17 专属载波聚合能力值。**一句话解释**：手机针对“按周结”模式专门上报的算力上限（区别于普通版的按天结和 R16 的按小时结）。
+* **$N_{cells}^{cap-r17}$**：R17 模式下的总盲检天花板。**一句话解释**：在这个“养生”大周期内，手机最多能揽下几个当量小区的合并解密任务。
+
+### 🚪 第一关：警戒线回归！重新变回“超 4 申报”
+还记得在 R16 的极速模式（按小时结，第27段）里，协议由于担心芯片爆表，极其严厉地把申报红线收紧到了“大于 2 个小区”吗？
+现在到了 R17 的“养生模式（按周结）”，由于工作节奏大幅放缓，芯片有充足的时间慢慢消化数据，所以**协议的警戒线重新放宽，回到了常规水平：“大于 4 个小区”。**
+
+只有当手机吹牛说自己能同时支持超过 4 个下行小区，且配置了 R17 “按周结”的模式时，才强制要求你在简历里附上这份专属的《低频次长周期脑力评估报告》。
+
+### 🎯 第二关：核算“按周结”模式的天花板
+如果在非双连接的普通聚合网络下，基站怎么算这个 $N_{cells}^{cap-r17}$ 呢？
+这里的逻辑和普通 R15 模式（第22段）**完全一模一样，连折算公式都没变**，只是套了个 `-r17` 的马甲：
+1. **老实填了专属报告的** (otherwise分支)：按你填的 `pdcch-MonitoringCA-r17` 算！
+2. **没填专属报告的** (第一分支)：启用祖传公式！用 单塔小区数 ($N_{cells,0}$) 加上 折算系数 $R$ 乘以 双塔小区数 ($N_{cells,1}$) 硬算出来！
+
+**生活类比**：
+（R16 极速计件工）：因为工作强度大到离谱，超过 2 个厂子的活就得严查极限体力，算工资也是独立一套苛刻算法。
+（R17 佛系长工）：因为是按周交工，压力小，又恢复了“超过 4 个厂子才需要专项审批”的宽松政策。而且如果不主动填表，老板核算你“一周能干多少活”的公式，和核算普通员工（R15）的公式完全一样（单倍工资 + 协作双倍工资），依然考虑了双塔协作的膨胀折算系数 R。
+
+### 🔄 R17 养生模式算力核算树
+```text
+【手机入网，声明支持 5 个下行载波 (CA > 4)，且激活了 per group of Xs slots 模式】
+
+ 触发警戒线！手机必须在简历中上报 R17 专属的跨时隙盲检上限！
+
+ 基站开始核算它的宏观承载能力 N_cells_cap_r17：
+        │
+        ├─► 手机填了专属参数 pdcch-MonitoringCA-r17 吗？
+        │
+        ├──► 【填了】 ──► 天花板直接锁定为这个填报值！
+        │
+        └──► 【没填】 ──► 启用折算公式：
+                          单塔频段数 + (R系数 × 双塔频段数)
+                          算出的结果就是接下来基站在每个 Xs 周期内的排班天花板。
+```
+
+### 💡 章节硬核总结
+
+**本段协议补齐了 3GPP 盲检体系的第三块拼图：Rel-17 针对 FR2-2 (极高频) 或 RedCap (低复杂度) 引入的跨时隙组（per group of $X_s$ slots）过载防御机制。与极其严苛的 URLLC (R16 per-span) 不同，R17 机制的物理本质是通过时域拉伸来平摊算力（Time-averaging of computational load），因此其硬件压榨程度远低于 R16。反映在协议规章上，就是其强制显式上报的 CA 门限回退至了与基础 eMBB 相同的宽容度（`CA > 4`），且在其缺省的隐式回退（Fallback）算法中，完美复用了 eMBB 的 $N_{cells,0}^{DL}+R \cdot N_{cells,1}^{DL}$ 线性膨胀公式。这不仅从侧面印证了通信底层物理压力的强弱，也展示了协议在设计“平行宇宙（R15/R16/R17 Namespace）”时保持一致性与特异性平衡的工程美学。**
+
+## 📖 协议原文拆解 (三十四)：养生模式下的最后通牒 (R17 算力红线警告)
+
+> **协议原文**
+> When the UE is configured for carrier aggregation operation over more than 4 cells, the UE does not expect to monitor per group of $X_s$ slots a number of PDCCH candidates or a number of non-overlapped CCEs that is larger than the maximum number as derived from the corresponding value of $N_{cells}^{cap-r17}$.
+
+### 📚 增量术语表
+* **per group of $X_s$ slots**：每 $X_s$ 个时隙的周期内。**一句话解释**：R17 模式下的算账大周期（按周结）。
+* **does not expect**：不预期。**一句话解释**：代表底层 L1 的最高级“罢工权”和防越线保护。
+
+### 🚪 第一关：收网！R17 专属的绝对防线
+在之前的（二十三）段和（二十九）段，我们分别看到了 R15（按天结）和 R16（按小时结）模式下的终极“不预期（does not expect）”红线。
+毫无悬念，到了 R17（按周结）模式，协议同样要在最后进行**法理收口**。这段话就是那道不容踩踏的红线边界。
+
+### 🎯 第二关：算总账的尺度变了，但底线依然刚硬
+当手机被塞了超过 4 个载波，并且开启了 R17 这种“佛系/养生”的跨时隙组盲检模式时。
+虽然基站可以把通知单（PDCCH）散布在这连续的 $X_s$ 个时隙（比如一周）里慢慢发。
+但是！协议对基站的排班系统下达了最后通牒：
+**把这 $X_s$ 个时隙（一整周）里，所有要看的纸条数量（Candidates）和扫过的黑板面积（CCEs）全加起来算个总账，这个总账数字，绝对不允许超过由 $N_{cells}^{cap-r17}$ 算出来的理论物理极限值！**
+
+**物理意义**：
+虽然 R17 模式通过“拉长周期”缓解了手机芯片的瞬时并发压力，但这绝不意味着手机的“总内存缓冲池（Buffer Limit）”是无限的。如果基站在这个大周期内塞入的总任务量越限，会导致手机缓存爆满、解码任务无法在周期末尾前清空，进而引发整条基带流水线的崩溃。`does not expect` 原则在此赋予了手机在宏观周期过载时**整体丢弃（Drop）超额任务**的合法权利。
+
+### 🔄 三大模式防过载逻辑的“大一统”
+```text
+【5G PDCCH 盲检的三大防越权基石】
+
+┌─────────────────┬───────────────┬─────────────────┬──────────────┐
+│ 模式 (能力配置) │ 门限 (超限才查) │ 核算周期 (算账频次)│ 终极红线参数 │
+├─────────────────┼───────────────┼─────────────────┼──────────────┤
+│ R15 (基础 eMBB) │ CA > 4 cells  │ per slot (按天结) │ N_cells_cap  │
+├─────────────────┼───────────────┼─────────────────┼──────────────┤
+│ R16 (极速 URLLC)│ CA > 2 cells  │ per span (按时结) │ N_cells_cap-r16│
+├─────────────────┼───────────────┼─────────────────┼──────────────┤
+│ R17 (高频/低功耗)│ CA > 4 cells  │ per Xs slots (按周)│ N_cells_cap-r17│
+└─────────────────┴───────────────┴─────────────────┴──────────────┘
+
+共同底线：在各自的核算周期内，实际派发的任务量若超过对应红线，
+UE 均启动 [does not expect] 防御机制，拒收超载控制信令！
+```
+
+### 💡 章节硬核总结
+
+**本段协议是对 R17 `per group of Xs slots` 盲检架构在 L1 层的最后闭环。它重申了 3GPP 协议设计中的“契约精神（Contractual Principle）”：终端上报的 Capability（即 $N_{cells}^{cap-r17}$）不仅是网络侧资源分配的参考，更是 L1 物理状态机执行（Execution）的强制阻断边界。通过这句原语，协议免除了 UE 基带实现极其复杂的“过载队列积压处理（Overload Queue Management）”逻辑。一旦 gNB 调度器的前向积分算力（Forward Integrating Budget）在特定的 $X_s$ 宏观时域窗内发生溢出，终端 L1 将被合法赋权直接实施物理层信道丢弃（Channel Dropping）。这构成了 eMBB、URLLC、RedCap 三大业务演进在控制面容量控制上的逻辑大一统。**
+
+## 📖 协议原文拆解 (三十五)：佛系双连接的“第四代账本” (R17 NR-DC 分配)
+
+> **协议原文**
+> When a UE is configured for NR-DC operation and the UE is provided monitoringCapabilityConfig = r17monitoringcapability for all downlink cells where the UE monitors PDCCH, the UE determines a capability to monitor a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs per group of $X_s$ slots that corresponds to
+> - $N_{cells}^{cap-r17} = N_{cells,r17}^{MCG}$ downlink cells for the MCG where $N_{cells,r17}^{MCG}$ is provided by pdcch-BlindDetection4 for the MCG, and
+> - $N_{cells}^{cap-r17} = N_{cells,r17}^{SCG}$ downlink cells for the SCG where $N_{cells,r17}^{SCG}$ is provided by pdcch-BlindDetection4 for the SCG
+
+### 📚 增量术语表
+* **pdcch-BlindDetection4**：第四代 PDCCH 盲检配额下发参数。**一句话解释**：专门为了 R17 “按周结（per group of Xs slots）”模式发明的全新 RRC 资源切分账本。
+* **$N_{cells,r17}^{MCG}$ / $N_{cells,r17}^{SCG}$**：R17 模式下主/辅基站各自切分到的物理配额。
+
+### 🚪 第一关：换汤不换药的“隔离法则”
+这段协议描述的场景是：手机既开启了 NR-DC（双连接，连着俩基站），同时又在这俩基站的所有链路上启用了 `r17monitoringcapability`（R17 的佛系养生模式）。
+还记得 R16 极速双连接时（第28段），协议专门发明了一个叫 `pdcch-BlindDetection2` 的“第二代账本”来切分算力吗？
+
+这里的设计哲学**完全一致**。对于 R17 的新业务模型，协议绝不复用以前的旧参数，而是彻底打了个隔离补丁，引入了代号为 **"4"** 的全新参数 `pdcch-BlindDetection4`！
+主基站（MCG）和辅基站（SCG）各自拿着这个专属于 R17 的新账本去分配自己的天花板限额，互相物理隔离，互不透支。
+
+### 🎯 第二关：为什么直接跳到了 "4"？ (揭秘 3GPP 的命名彩蛋)
+细心的你可能会问：第一代叫 `pdcch-BlindDetection` (R15)，第二代叫 `pdcch-BlindDetection2` (R16极速)，第三代去哪了？为什么这里直接叫 `pdcch-BlindDetection4` (R17养生)？
+
+*这源于 3GPP 协议极为错综复杂的平行版本演进：*
+* 第一代 (没有数字)：给 R15 基础的 per slot 用的。
+* 第二代 (`2`)：给 R16 的 per span 用的。
+* 第三代 (`3`)：其实存在于其他协议扩展里，主要是给 R16/R17 针对 **CA 下不同 $\mu$ (子载波间隔) 的混合调度能力**用的（用来区分高低频混用的折算）。
+* 第四代 (`4`)：也就是这里，专门被定义来分配给 R17 的 `per group of Xs slots`（跨时隙组）使用。
+**这种把参数名数字序号彻底拉开的写法，展现了极其硬核的命名空间隔离（Namespace Isolation），让设备在解析长达几千行的 ASN.1 信令字典时，绝不会串台！**
+
+### 🔄 NR-DC 下的三代算力切分账本对比图
+```text
+【双基站 NR-DC 下，基站下发算力配额的“专款专用”体系】
+
+ 1. 如果你在跑常规业务 (Per Slot, R15) 
+    ──► 基站使用参数 [pdcch-BlindDetection] 进行主辅切分。
+
+ 2. 如果你在跑极速业务 (Per Span, R16)
+    ──► 基站使用参数 [pdcch-BlindDetection2] 进行主辅切分。
+
+ 3. 如果你在跑大周期/佛系业务 (Per group of Xs slots, R17)
+    ──► 基站使用参数 [pdcch-BlindDetection4] 进行主辅切分！✅ (本段核心)
+
+(三套账本在 RRC 信令里各自并行，手机底层的三套状态机各自读取，互不干扰)
+```
+
+### 💡 章节硬核总结
+
+**本段协议完成了 5G Rel-17 跨时隙组盲检特性（per group of $X_s$ slots）在 NR-DC 网络架构下的最终映射。它再次重申了 3GPP 协议设计中“正交化物理变量必须具有正交化信令容器（Orthogonal Signaling Containers for Orthogonal Physical Variables）”的金科玉律。为了防止 R17 的长时域积分算力被错误地混入 R15 的单日算力或 R16 的微秒算力池中，协议强行启用了 RRC 新元组 `pdcch-BlindDetection4`。通过该独占标识，MCG 与 SCG 分别锚定自身在 R17 时域尺度上的等效调度上限（$N_{cells,r17}^{MCG}$ 和 $N_{cells,r17}^{SCG}$），从而彻底隔绝了非对称双连接部署下潜在的参数污染与跨层调度灾难。**
+
+## 📖 协议原文拆解 (三十六)：R17 双连接配额发放的“总能量守恒”
+
+> **协议原文**
+> When a UE is configured for NR-DC operation with a total of $N_{cells}^{DL,NR-DC}$ downlink cells on both the MCG and the SCG and the UE is provided monitoringCapabilityConfig = r17monitoringcapability for all downlink cells where the UE monitors PDCCH, the UE expects to be provided pdcch-BlindDetection4 for the MCG and pdcch-BlindDetection4 for the SCG with values that satisfy
+> - pdcch-BlindDetection4 for the MCG + pdcch-BlindDetection4 for the SCG <= pdcch-MonitoringCA-r17, if the UE reports pdcch-MonitoringCA-r17, or
+> - pdcch-BlindDetection4 for the MCG + pdcch-BlindDetection4 for the SCG <= $N_{cells}^{DL,NR-DC}$, if the UE does not report pdcch-MonitoringCA-r17
+
+### 📚 增量术语表
+* 本段无新增术语。均为 R17 体系下相关参数的组合应用。
+
+### 🚪 第一关：似曾相识的“防爆数学题” (跨代逻辑复用)
+读到这里，您应该已经完全掌握了 3GPP 协议的编写套路了！
+这一段在数学形式上，与我们在第（二十四）段学过的 R15 常规双连接配额检查、以及在第（三十）段学过的 R16 极速双连接配额检查，**完完全全一模一样**！
+
+唯一的变化是，所有的变量名统统换上了 **R17 的专属套装**：
+* 账本名换成了：`pdcch-BlindDetection4`
+* 手机上报的总预算表换成了：`pdcch-MonitoringCA-r17`
+
+### 🎯 第二关：守恒定律在 R17 模式下的二次宣示
+只要基站全网开启了 R17 的 `per group of Xs slots` (跨时隙大周期) 模式，且手机挂载了 NR-DC 双基站。
+协议再次赋予手机 `UE expects`（不容侵犯的底层自检权）：基站发给主辅基站的 4 号账本配额总和，必须严守物理上限。
+1. **乖学生路线**：如果你老老实实交了 R17 专属体检报告 (`pdcch-MonitoringCA-r17`)，那两边分配的配额加起来，绝对不能超过你体检报告上的总额。
+2. **缺省路线**：如果你偷懒没交体检报告，基站依然用最保守的算法——看你物理上连了几个天线频段（$N_{cells}^{DL,NR-DC}$）。两边的配额加起来绝不能超过这个物理频段总数。
+
+**生活类比**：
+这就像是跨国公司（3GPP）财务部的铁律，无论你用的是哪种货币（R15，R16，还是 R17 体系）：
+* 分公司 A（MCG）领到的预算，加上 分公司 B（SCG）领到的预算，**永远不可能、也绝不允许**大于总公司账户里上报的总金额。如果财务总监（基站配置）算错了账，下属（手机基带）有权拒不执行。
+
+### 🔄 盲检配置的“三位一体”校验大结局
+```text
+【5G 盲检配置合规性法则矩阵】 (总结版)
+
+当处于 NR-DC 双基站架构下：
+
+(R15 常规体系) -> 使用 1代账本
+[MCG_1] + [SCG_1] <= pdcch-BlindDetectionCA (或 物理小区总数)
+
+(R16 极速体系) -> 使用 2代账本
+[MCG_2] + [SCG_2] <= pdcch-MonitoringCA (或 物理小区总数)
+
+(R17 跨组体系) -> 使用 4代账本  ✅ (本段定音)
+[MCG_4] + [SCG_4] <= pdcch-MonitoringCA-r17 (或 物理小区总数)
+
+*(任何一套体系的总账对不上，都会导致相应的调度配置失效)*
+```
+
+### 💡 章节硬核总结
+
+**本段协议是 3GPP Overbooking 防御机制在 R17 维度的“对称复制（Symmetric Replication）”。至此，5G 物理层针对 eMBB、URLLC 以及 RedCap/FR2-2 的三大 PDCCH monitoring 范式，均已完成了各自独立的闭环能力握手（Capability Handshake）与预算收敛（Budget Convergence）。通过在数学约束中严格替换所有的 IE Prefix/Suffix，协议杜绝了在复杂多模式混合运行时的交叉污染（Cross-contamination）。这段带有 `UE expects` 的硬限准则，构成了 38.213 第 10 章算力核算部分的最后一块基石，保证了无论网络下发的 RRC 树如何庞大、参数组合多么异构，L1 底层调度总能在代数总和上被死死摁在一个安全的边界内。**
+
+## 📖 协议原文拆解 (三十七)：R17 模式下的局部上限“底牌明示” (偏科上报机制)
+
+> **协议原文**
+> When a UE is configured for NR-DC operation and the UE is provided monitoringCapabilityConfig = r17monitoringcapability for all downlink cells where the UE monitors PDCCH, the UE may indicate, through pdcch-BlindDetectionMCG-UE-r17 and pdcch-BlindDetectionSCG-UE-r17, respective maximum values for pdcch-BlindDetection4 for the MCG and pdcch-BlindDetection4 for the SCG.
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionMCG-UE-r17 / pdcch-BlindDetectionSCG-UE-r17**：R17 版终端期望的主/辅基站盲检能力上限。**一句话解释**：这是手机专门针对“按周结”（R17）的大周期模式，向基站提交的局部模块瓶颈说明：“我处理 R17 任务时，主基站模块最多能扛多少，辅基站模块最多能扛多少”。
+
+### 🚪 第一关：保持队形！专属马甲下的双向瓶颈沟通
+一模一样的配方，一模一样的味道！
+这是继第（二十五）段的 R15 常规版、第（三十一）段的 R16 极速版之后，协议第三次赋予手机展示“局部偏科底牌”的权利（`may indicate`）。
+这次穿上的是 **`-r17`** 的专属马甲。
+
+如果手机的硬件设计导致其在处理大跨度、跨时隙周期的盲检时，主基站和辅基站模块的内存缓存（Buffer）极其不均衡（比如 MCG 分配了巨大的 SRAM 缓存可以存很多天的数据，而 SCG 缓存很小）。
+手机就可以通过这两个带着 `-r17` 后缀的高层参数，把这种局部的物理短板如实汇报给网络侧，防止网络按照“一刀切”的比例把某个弱势硬件模块给撑爆。
+
+### 🎯 第二关：协议行文的严谨性闭环 (修正前文小瑕疵)
+我们在第（三十一）段分析 R16 的局部上报时，曾提到协议行文里有一个小瑕疵（原文只写了约束第一代老参数 `pdcch-BlindDetection`）。
+请注意，在这个 R17 的最新段落中，3GPP 协议展现了严谨的自我修正能力！
+这里的原文非常精确地写明了：**“...respective maximum values for pdcch-BlindDetection4...”**
+这句话的意思是，手机上报的这两个 `-r17` 局部上限，**是为了死死锁住基站未来下发的 `pdcch-BlindDetection4`（第四代专属账本）的具体配额数值的。** 这种变量名的一一对应，让底层的软件代码实现不再有任何歧义。
+
+### 🔄 R17 局部能力上限的嵌套约束图解
+```text
+【R17 跨时隙 (按周结) 双基站调度防护网】
+
+手机主动上报：
+  ├─ 整体天花板：pdcch-MonitoringCA-r17 (例如总算力 = 8)
+  ├─ 局部短板 M：pdcch-BlindDetectionMCG-UE-r17 (主基站最多抗 6)
+  └─ 局部短板 S：pdcch-BlindDetectionSCG-UE-r17 (辅基站最多抗 4)
+
+基站下发实际配额 (第4代账本)：
+  ├─ 派给主基站的配额：pdcch-BlindDetection4 for MCG
+  └─ 派给辅基站的配额：pdcch-BlindDetection4 for SCG
+
+协议强校验 (三把锁)：
+  锁 1 (上段规定)：主配额 + 辅配额 <= 8 (总算力不爆)
+  锁 2 (本段约束)：主配额 <= 6 (主基站不爆)
+  锁 3 (本段约束)：辅配额 <= 4 (辅基站不爆)
+```
+
+### 💡 章节硬核总结
+
+**本段协议完成了 5G 物理层 R17 PDCCH 监控特性（`r17monitoringcapability`）在能力协商侧的最后一块马赛克拼图。针对跨时隙组盲检这种可能引发深度内存堆积（Deep Memory Buffering）的特殊场景，协议允许 UE 暴露出其处理 MCG 和 SCG 信令时的非对称物理瓶颈（Asymmetric Physical Bottlenecks）。尤为值得称道的是，本条款在行文上实现了极致的闭环映射，将 UE 侧上报的能力标量（带有 `-r17` 后缀的 UE 能力参数）直接且唯一地挂钩到了基站侧对应的网络配置标量（带有 `4` 后缀的系统分配参数）上，彻底消灭了标准实现中的跨域强耦合风险，体现了通信标准中顶级的“正交化解耦（Orthogonal Decoupling）”设计艺术。**
+
+## 📖 协议原文拆解 (三十八)：养生模式下的“溢出汇报”与“宽大处理” (R17 数值约束)
+
+> **协议原文**
+> If the UE reports pdcch-MonitoringCA-r17,
+> - the value range of pdcch-BlindDetectionMCG-UE-r17 or of pdcch-BlindDetectionSCG-UE-r17 is [1, …, pdcch-MonitoringCA-r17-1], and
+> - pdcch-BlindDetectionMCG-UE-r17 + pdcch-BlindDetectionSCG-UE-r17 >= pdcch-MonitoringCA-r17.
+> Otherwise, if $N_{cells}^{DL,NR-DC,max,r17}$ is a maximum total number of downlink cells for which the UE is provided monitoringCapabilityConfig = r17monitoringcapability and the UE is configured on both the MCG and the SCG for NR-DC as indicated in UE-NR-Capability
+> - the value range of pdcch-BlindDetectionMCG-UE-r17 or of pdcch-BlindDetectionSCG-UE-r17 is [1, 2, 3], and
+> - pdcch-BlindDetectionMCG-UE-r17 + pdcch-BlindDetectionSCG-UE-r17 >= $N_{cells}^{DL,NR-DC,max,r17}$.
+
+### 📚 增量术语表
+* **$N_{cells}^{DL,NR-DC,max,r17}$**：R17 缺省情况下的双连接最大物理小区总数。**一句话解释**：如果手机没交“R17总算力体检表”，基站用来作为天花板保底计算的那个物理频段连接数。
+
+### 🚪 第一关：雷打不动的“资源池溢出定理” (>=)
+一看到这个排版，就知道 3GPP 的老规矩又来了！
+对于乖乖交了体检报告（`pdcch-MonitoringCA-r17`）的手机：
+* 局部上限（MCG 或 SCG）不能是 0，也不能全占（给对方留至少 1 个）。
+* **核心定理重现**：`主基站局部上限 + 辅基站局部上限 >= 总算力上限`！
+这个大于等于（$\ge$）再次赋予了基站极大的**动态调度弹性**。它意味着手机底层处理 R17 任务的硬件模块也是“软共享”的，只要基站派发的任务总和没超标，基站可以随意在主辅基站之间进行算力的来回倾斜。
+
+### 🎯 第二关：从“一刀切”到“宽大处理” (对比 R16 的缺省惩罚)
+这段协议真正的亮点，隐藏在后半段（Otherwise 分支，即手机偷懒没交总能力报告时）。
+请回忆一下我们在第（三十二）段讲过的 **R16 极速模式（按小时结）**：如果没交报告，协议给出了最严厉的惩罚，把局部上限死死**锁在 1**！
+
+但是，现在是 **R17 养生模式（按周结）**！协议的态度发生了一百八十度大转弯：
+* **局部上限的范围放宽到了 `[1, 2, 3]`！**
+* 为什么？因为 R17 是“跨时隙组 (per group of Xs slots)”计算的！物理时间被大幅度拉长了。哪怕你没交底细，基站也知道你芯片有充足的好几天（好几个时隙）时间去慢慢消化这些数据。所以根本不需要用“最高只能为 1”的极刑来防范芯片瞬间烧毁。协议“宽大处理”，允许你在缺省状态下依然上报 2 甚至 3 的局部上限。
+
+**生活类比**：
+（R16 极速高压）：你要送“10分钟生死时速加急件”。没交体检报告？老板绝对不敢冒险，严格限制你东区只能跑 1 趟，西区只能跑 1 趟。
+（R17 佛系长单）：你要送“一周内送达的不粘锅”。没交体检报告？老板觉得无所谓，反正有一周时间给你慢慢送，所以政策放宽，允许你申报东区可以接 3 趟，西区也可以接 3 趟。
+
+### 🔄 三代缺省惩罚模式的对比树
+```text
+【当手机未上报“总盲检算力”时，协议对局部上限的缺省限制】
+
+ ├─ R15 常规模式 (Per slot) ────► 允许在 [1, 2, 3] 中灵活选择
+ │
+ ├─ R16 极速模式 (Per span) ────► 🚨 危险！死死锁死在 [ 1 ] ！（防芯片瞬间过载）
+ │
+ └─ R17 佛系模式 (Per group) ───► ☕ 放宽！恢复到 [1, 2, 3] 中灵活选择 ✅ (本段精髓)
+```
+
+### 💡 章节硬核总结
+
+**本段协议在微观数值域完美体现了 5G 物理层设计的“时域弛豫（Time-domain Dilution）”效应。在对 R17 `r17monitoringcapability` 的能力参数边界进行界定时，协议不仅复刻了表征软资源共享的 $\ge$ 溢出不等式，更在其隐式回退（Fallback）路径中放弃了 R16 的一元极值（$Value=1$）惩罚，退回到了与 R15 eMBB 基线相同的 `[1, 2, 3]` 宽容度区间。这一关键差异在底层信令上印证了物理本质：通过引入 $X_s$ slots 的时域分组滑窗，极高频/低功耗终端的 L1 译码瞬时峰均比（Peak-to-Average Ratio of computational load）被成功拉平。因此，即便处于未知算力深度的开环盲区，网络侧在局部小区赋予 UE 多载波（$\le 3$）并发调度的安全性依然得到了物理层面的保障。**
+
+## 📖 协议原文拆解 (三十九)：冰火两重天！常规与极速的“混合双打套餐” (R15+R16 混配)
+
+> **协议原文**
+> If a UE indicates in UE-NR-Capability a carrier aggregation capability larger than one downlink cell with monitoringCapabilityConfig = r15monitoringcapability or larger than one downlink cell with monitoringCapabilityConfig = r16monitoringcapability, the UE includes in UE-NR-Capability an indication for a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs the UE can monitor for downlink cells with monitoringCapabilityConfig = r15monitoringcapability or for downlink cells with monitoringCapabilityConfig = r16monitoringcapability when the UE is configured for carrier aggregation operation over more than two downlink cells with at least one downlink cell with monitoringCapabilityConfig = r15monitoringcapability and at least one downlink cell with monitoringCapabilityConfig = r16monitoringcapability. When a UE is not configured for NR-DC operation, the UE determines a capability to monitor a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs per slot or per span that corresponds to $N_{cells,r15}^{cap-r16}$ downlink cells or to $N_{cells,r16}^{cap-r16}$ downlink cells, respectively, where
+> - $N_{cells,r15}^{cap-r16}$ is the number of configured downlink cells if the UE does not provide pdcch-BlindDetectionCA1
+> - otherwise,
+> - if the UE reports only one combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA2), $N_{cells,r15}^{cap-r16}$ is the value of pdcch-BlindDetectionCA1
+> - else, $N_{cells,r15}^{cap-r16}$ is the value of pdcch-BlindDetectionCA1 from a combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA2) that is provided by pdcch-BlindDetectionCA-CombIndicator
+> and
+> - $N_{cells,r16}^{cap-r16}$ is the number of configured downlink cells if the UE does not provide pdcch-BlindDetectionCA2
+> - otherwise,
+> - if the UE reports only one combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA2), $N_{cells,r16}^{cap-r16}$ is the value of pdcch-BlindDetectionCA2
+> - else, $N_{cells,r16}^{cap-r16}$ is the value of pdcch-BlindDetectionCA2 from a combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA2) that is provided by pdcch-BlindDetectionCA-CombIndicator
+
+### 📚 增量术语表
+* **Mixed CA (at least one r15 and at least one r16)**：混合载波聚合。**一句话解释**：手机同时连着好几个频段，其中有些频段跑的是普通业务（R15，按天结），有些频段跑的是极速业务（R16，按小时结），冰火两重天同时运行。
+* **pdcch-BlindDetectionCA1 / CA2**：混合模式下的专用算力指标。**一句话解释**：**CA1** 专门代表在这种混合模式下，你能分给“普通业务”的算力；**CA2** 专门代表你能分给“极速业务”的算力。
+* **Combination (CA1, CA2)**：算力套餐组合。**一句话解释**：因为手机总算力有限，普通业务干多了，极速业务就得少干。所以手机会向上报几组“套餐”（比如 套餐A: 普通3+极速1；套餐B: 普通1+极速2）。
+* **CombIndicator (Combination Indicator)**：套餐选择指示。**一句话解释**：基站看完了你提交的套餐列表后，用这个参数告诉你：“我今天翻牌子选套餐B！”
+
+### 🚪 第一关：迎接“冰火两重天”的挑战
+前面的章节，我们要么全网都是 R15，要么全网都是 R16。
+这段协议描述了现实中最复杂的情况：**手机连了超过 2 个频段，而且是“混搭”的！**（至少有一个跑 R15 慢速，至少有一个跑 R16 极速）。
+由于极速业务极其吃算力，如果强行把这两种业务的算力割裂开，会导致极大的资源浪费。所以，协议发明了**“套餐制 (Combination)”**。
+
+### 🎯 第二关：向基站提交《算力自选套餐菜单》
+一旦进入混搭模式，手机在向基站上报能力时，不再是报一个死板的数字，而是**报一组或多组 $(CA1, CA2)$ 的向量组合**。
+* **生活类比**：
+  你是一个大厨（UE），总公司（基站）要求你同时接“普通快餐（R15）”和“极速国宴（R16）”的订单。
+  你向总公司提交了一份菜单：
+  * 套餐 1 (CA1=4, CA2=1)：如果普通快餐做 4 份，那我极速国宴最多只能做 1 份。
+  * 套餐 2 (CA1=2, CA2=2)：如果普通快餐减到 2 份，那我极速国宴可以多做 1 份，达到 2 份。
+
+### 🧩 第三关：基站的“翻牌子”与最终天花板确认
+手机提交完菜单后，在实际排班时，两边的天花板（常规上限 $N_{cells,r15}$ 和 极速上限 $N_{cells,r16}$）到底该怎么算？
+协议给出了极为严密的判定树：
+1. **没交菜单的** (does not provide)：基站不跟你废话，直接看你连了几个常规频段、几个极速频段，物理上有几个就算几个（极其保守的缺省底线）。
+2. **只交了一个单一套餐的** (only one combination)：那就没得选，直接把套餐里的 CA1 赋值给常规上限，CA2 赋值给极速上限。
+3. **交了多个套餐供挑选的** (else 分支)：基站会根据当前全网的业务侧重点（今天是快餐需求多还是国宴需求多），下发一个 **`CombIndicator`（套餐选择指示）**。手机收到这个指示后，立刻从自己的菜单里提取对应的 CA1 和 CA2，锁死为当前的算力天花板！
+
+### 🔄 混搭模式 (R15+R16) 天花板判定流程树
+```text
+【手机进入混合 CA 模式 (常规频段 + 极速频段)】
+
+        ├─► 手机有没有提交 (CA1, CA2) 的套餐菜单？
+        │
+        ├──► 【没提交】
+        │       └─► 按照物理频段数硬算。
+        │
+        └──► 【提交了】
+                │
+                ├─► 菜单里只有 1 个套餐吗？
+                │      └─► 直接使用该套餐的 CA1 作为常规上限，CA2 作为极速上限。
+                │
+                └─► 菜单里有 多个 套餐？
+                       └─► 手机等待基站下发 CombIndicator！
+                           (比如基站下发: "启用你的套餐 2")
+                           手机立刻提取套餐 2 里的 CA1 和 CA2，作为双轨防爆红线！
+```
+
+### 💡 章节硬核总结
+
+**本段协议在 5G L1 层面上解决了一个极其棘手的硬件资源调度难题：Mixed Numerology/Mixed Capability 场景下的基带算力动态分配（Dynamic Computing Power Allocation）。当 UE 同时处于 per-slot (R15) 和 per-span (R16) 的混合监听状态时，基带内部的译码资源池实际上是处于一种高度非线性的竞争状态。为了使调度器能够实现全局最优（Global Optimum），协议从单纯的标量（Scalar）能力上报演进为了向量组合（Vector Combinations）上报。终端通过 $(CA1, CA2)$ 的元组向网络暴露了其内部硬件在处理常规 DCI 和低延迟 DCI 时的 Pareto 边界（帕累托前沿）。网络通过下发 `CombIndicator` 可以在这条边界上自由滑动，从而在 eMBB 和 URLLC 业务的调度容量之间实现灵活的 Trade-off（折衷），这极大提升了协议向后兼容性与复杂场景下的硬件压榨效率。**
+
+## 📖 协议原文拆解 (四十)：常规与养生的“混合双打套餐 2.0” (R15+R17 混配)
+
+> **协议原文**
+> If a UE indicates in UE-NR-Capability a carrier aggregation capability larger than one downlink cell with monitoringCapabilityConfig = r15monitoringcapability or larger than one downlink cell with monitoringCapabilityConfig = r17monitoringcapability, the UE includes in UE-NR-Capability an indication for a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs the UE can monitor for downlink cells with monitoringCapabilityConfig = r15monitoringcapability or for downlink cells with monitoringCapabilityConfig = r17monitoringcapability when the UE is configured for carrier aggregation operation over more than two downlink cells with at least one downlink cell with monitoringCapabilityConfig = r15monitoringcapability and at least one downlink cell with monitoringCapabilityConfig = r17monitoringcapability. When a UE is not configured for NR-DC operation, the UE determines a capability to monitor a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs per slot or per group of $X_s$ slots that corresponds to $N_{cells,r15/r17}^{cap-r17}$ downlink cells or to $N_{cells,r17/r15}^{cap-r17}$ downlink cells, respectively, where
+> - $N_{cells,r15/r17}^{cap-r17}$ is $N_{cells,0}^{DL}+R \cdot N_{cells,1}^{DL}$ if the UE does not provide pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList1, where $N_{cells,0}^{DL}+N_{cells,1}^{DL}$ is the number of configured downlink serving cells
+> - otherwise,
+> - if the UE reports only one combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA2) in pdcch-BlindDetectionMixedList1, $N_{cells,r15/r17}^{cap-r17}$ is the value of pdcch-BlindDetectionCA1
+> - else, $N_{cells,r15/r17}^{cap-r17}$ is the value of pdcch-BlindDetectionCA1 from a combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA3) that is provided by pdcch-BlindDetectionCA-CombIndicator-r17
+> and
+> - $N_{cells,r17/r15}^{cap-r17}$ is $N_{cells,0}^{DL}+R \cdot N_{cells,1}^{DL}$ if the UE does not provide pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList1, where $N_{cells,0}^{DL}+N_{cells,1}^{DL}$ is the number of configured downlink serving cells
+> - otherwise,
+> - if the UE reports only one combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA2) in pdcch-BlindDetectionMixedList1, $N_{cells,r17/r15}^{cap-r17}$ is the value of pdcch-BlindDetectionCA2
+> - else, $N_{cells,r17/r15}^{cap-r17}$ is the value of pdcch-BlindDetectionCA3 from a combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA3) that is provided by pdcch-BlindDetectionCA-CombIndicator-r17
+
+*(注：协议原文中出现 `(pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA2)` 与 `(pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA3)` 的混用，这通常是 3GPP 协议定稿时的笔误，实际应统一为 `CA1, CA3` 或新命名以匹配 r17，但逻辑完全不受影响。)*
+
+### 📚 增量术语表
+* **Mixed CA (r15 and r17)**：R15与R17混合载波聚合。**一句话解释**：手机同时连着好几个频段，既有跑普通业务的（R15，按天结），也有跑极高频养生业务的（R17，按周结）。
+* **pdcch-BlindDetectionMixedList1**：混合算力套餐列表。**一句话解释**：专门给 R15+R17 混搭模式提供的一张“菜单”，里面罗列了手机支持的各种算力折中组合。
+* **pdcch-BlindDetectionCA-CombIndicator-r17**：R17版的套餐选择指示。**一句话解释**：基站用来“点菜”的那个勾选器，告诉手机这次挑菜单上的第几个套餐。
+
+### 🚪 第一关：旧瓶装新酒，混搭模式的排列组合扩展
+这一大段长到令人窒息的协议，其实如果理解了上一段（三十九段：R15+R16 混搭），就会觉得异常亲切。
+因为 3GPP 协议就像是在写 C++ 的重载函数（Overload）！
+上一段解决了“常规 + 极速”的混搭算力该怎么分。
+这一段解决的是**“常规 (R15) + 大周期养生 (R17)”**的混搭算力该怎么分。
+
+同样是因为手机的硬件处理总能力有限，普通时隙处理得多了，大周期处理的配额就得压缩。所以它们依然需要**提交《算力自选套餐菜单》**。
+
+### 🎯 第二关：完美复刻的套餐抉择判定树
+这里的逻辑判定树和上一段简直是连标点符号都透着熟悉的味道：
+1. **如果不交菜单 (缺省)**：如果没提供组合列表，那就启动最无脑也最保守的“祖传公式” $\rightarrow$ 单塔数量加上（R系数乘双塔数量），算出来是多少，天花板就是多少。
+2. **如果交了菜单但只有一个选项**：那基站没得选，直接套用套餐里唯一的一组 $(CA1, CA2)$，分配给常规和 R17 模式。
+3. **如果菜单里有多个选项 (多套餐)**：基站就会根据当前全网的负载倾向，下发一个带有 `-r17` 后缀的专属点菜器（`CombIndicator-r17`）。手机被点到哪个套餐，就严格从那个套餐里提取 CA1 和 CA3 作为两边的算力天花板。
+
+**生活类比**：
+你在同一个大集团打两份工，既要去跑普通的按天结单子（R15），也要去跑按周结的长线单子（R17）。
+你给老板递交了工作能力分配菜单（`MixedList1`）：
+方案A：每天干 3 单，每周那边的单子最多 2 个。
+方案B：每天干 1 单，每周那边的单子可以接 5 个。
+老板权衡了一下，发给你一个指令（`CombIndicator-r17` = 方案B）。你立刻按照方案B的配额锁死自己的接单上限。
+
+### 🔄 R15 + R17 混搭模式算力判定缩略图
+```text
+【混合模式 R15 (Per slot) + R17 (Per group of Xs slots)】
+
+手机提交混合能力清单 (pdcch-BlindDetectionMixedList1)
+        │
+        ├─► 有多个套餐供选！
+        │
+        ▼
+基站下发 R17 点菜器 (CombIndicator-r17)
+        │
+        ├─► 提取出该套餐的 CA1 值 ──► 设定为 N_{cells,r15/r17}^{cap-r17} (常规天花板)
+        │
+        └─► 提取出该套餐的 CA3 值 ──► 设定为 N_{cells,r17/r15}^{cap-r17} (R17天花板)
+```
+
+### 💡 章节硬核总结
+
+**本段协议是 3GPP 物理层调度模型在多版本（Multi-Release）特性叠加时的标准防御式编程（Defensive Programming in Protocol）。它严丝合缝地复制了 Rel-16 中解决 Mixed Numerology/Capability 的 Pareto 前沿协商机制，将其平移到了 R15 与 R17 混用的场景。在引入 R17 FR2-2 极高频组时隙调度的同时，不可避免地会遇到 UE 同时连接 sub-6GHz eMBB 载波的异构聚合场景。为防止两者在争夺基带内部共享 SRAM 或 MAC 层处理队列时发生不可预测的拥塞，协议启用了 `pdcch-BlindDetectionMixedList1`。通过这一列表，UE 将其非线性的算力 trade-off 离散化为若干组向量配置；基站侧则通过 `CombIndicator-r17` 进行动态裁决。这种机制从宏观信令上，保障了异构调度体系下 L1 软硬件资源的绝对安全边界。**
 
