@@ -2750,3 +2750,646 @@ Per Slot  Per Span  Per Group
 
 **本段协议在数学骨架上完美重用了 R15+R16 的分配逻辑（第四十八段），但将其定界参数精准替换为面向 R15+R17 组合态的专属 IE 集合。这是 3GPP "正交扩展（Orthogonal Extension）" 设计范式的典型应用：在拓扑逻辑完全解耦的前提下，只要更换参数字典中的后缀名（如 `BlindDetection4` 取代 `BlindDetection2`，`MixedList1` 取代单独的能力上报），即可支撑全新的业务物理模型。此处的守恒方程确保了在引入 `per group of Xs slots` 的拉伸时域盲检架构时，NR-DC 节点间的资源切割能够得到强制的 RRC 级数学约束，将基带死锁防范逻辑以最小的协议开销前置到了基站配置合法性检验阶段。**
 
+## 📖 协议原文拆解 (五十三)：双基站+佛系混搭的“四维局部底牌” (嵌套式上报机制)
+
+> **协议原文**
+> When a UE is configured for NR-DC operation and is provided monitoringCapabilityConfig = r15monitoringcapability for at least one downlink cell and monitoringCapabilityConfig = r17monitoringcapability for at least one downlink cell where the UE monitors PDCCH, the UE may indicate, through pdcch-BlindDetectionCG-UE1 in pdcch-BlindDetectionMCG-UE-Mixed and pdcch-BlindDetectionCG-UE1 in pdcch-BlindDetectionSCG-UE-Mixed, respective maximum values for pdcch-BlindDetection3 for the MCG and pdcch-BlindDetection3 for the SCG, and through pdcch-BlindDetectionCG-UE2 in pdcch-BlindDetectionMCG-UE-Mixed and pdcch-BlindDetectionCG-UE2 in pdcch-BlindDetectionSCG-UE-Mixed, respective maximum values for pdcch-BlindDetection4 for the MCG and pdcch-BlindDetection4 for the SCG.
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionMCG-UE-Mixed / SCG-UE-Mixed**：混搭模式专属的局部能力“公文包”。**一句话解释**：因为混搭模式下要上报的参数太多了，协议干脆给主基站和辅基站各发了一个“公文包（结构体）”，把各种能力指标统统打包塞在里面。
+* **pdcch-BlindDetectionCG-UE1**：公文包里的 1 号文件（管常规）。**一句话解释**：专门负责锁定第 3 代账本（R15 常规配额）的局部上限。
+* **pdcch-BlindDetectionCG-UE2**：公文包里的 2 号文件（管养生）。**一句话解释**：专门负责锁定第 4 代账本（R17 大周期配额）的局部上限。
+
+### 🚪 第一关：熟悉的“摊牌”环节，升级的“文件夹”结构
+如果您还记得第（四十九）段中 R15+R16 的混搭上报，这段 R15+R17 的混搭逻辑在物理含义上是完全一致的：**允许手机向基站亮出自己在各个局部硬件模块上的“偏科短板”**。
+
+但请注意这段协议在“参数命名”上的微妙变化！
+随着协议写到 R17，3GPP 的专家们发现名字越来越长、越来越容易乱。于是他们使用了编程中常见的**“结构体嵌套（Nested Structure）”**思路：
+* 专门创建了一个叫 **`Mixed` (混合)** 的大文件夹，分发给 MCG 和 SCG。
+* 在文件夹里面，塞入 `UE1`（对应第一项能力）和 `UE2`（对应第二项能力）。
+
+### 🎯 第二关：建立 4 个维度的绝对控制映射
+手机上交的这两个“公文包”，将死死锁住基站未来下发的四个物理配额，形成一一对应的映射：
+
+**关于主基站 (MCG) 的公文包：**
+* 包里的 `UE1` ──► 锁死主基站 R15 的配额 (`BlindDetection3 for MCG`)
+* 包里的 `UE2` ──► 锁死主基站 R17 的配额 (`BlindDetection4 for MCG`)
+
+**关于辅基站 (SCG) 的公文包：**
+* 包里的 `UE1` ──► 锁死辅基站 R15 的配额 (`BlindDetection3 for SCG`)
+* 包里的 `UE2` ──► 锁死辅基站 R17 的配额 (`BlindDetection4 for SCG`)
+
+**生活类比**：
+你是区域总代理（终端），手下有主干店（MCG）和加盟店（SCG）。
+两家店都在接“外卖日结单（R15）”和“团购周结单（R17）”。
+你给总部发了两个加密压缩包：
+* 《主干店极限接单能力.zip》：解压后，表格 1 写着日结单最多 50 单；表格 2 写着周结单最多 10 单。
+* 《加盟店极限接单能力.zip》：解压后，表格 1 写着日结单最多 30 单；表格 2 写着周结单最多 5 单。
+总部在派单时，必须同时查验这两个压缩包里的 4 个数字，任何一个分店的任何一个业务超标，系统都会报警阻断。
+
+### 🔄 嵌套式 (Nested) 局部能力上报架构图
+```text
+【R15 + R17 混搭双连接的 RRC 嵌套上报结构】
+
+                   [ 终端 UE 发送的体检报告 ]
+                               │
+       ┌───────────────────────┴───────────────────────┐
+       ▼                                               ▼
+[主基站公文包 MCG-UE-Mixed]                     [辅基站公文包 SCG-UE-Mixed]
+ │                                               │
+ ├─ 📂 CG-UE1: R15常规上限                         ├─ 📂 CG-UE1: R15常规上限
+ │    └─ 钳制目标 ──► (BlindDetection3 for MCG)  │    └─ 钳制目标 ──► (BlindDetection3 for SCG)
+ │                                               │
+ └─ 📂 CG-UE2: R17大周期上限                       └─ 📂 CG-UE2: R17大周期上限
+      └─ 钳制目标 ──► (BlindDetection4 for MCG)       └─ 钳制目标 ──► (BlindDetection4 for SCG)
+
+*(通过这种树状结构的 ASN.1 编码，实现了复杂组合下参数的完美收敛与防混淆)*
+```
+
+### 💡 章节硬核总结
+
+**本段协议在 RRC 信令编码层面展示了 3GPP 对极高维参数空间的结构化管理（Structured Parameter Management）能力。在 NR-DC 叠加 R15/R17 Mixed CA 的场景中，若依然采用平铺直叙的参数命名法（Flat Naming），将导致 L1/L2 解析器的代码极其冗长且易错。协议创新性地引入了带有 `-Mixed` 后缀的容器型 IE（Information Element Container），在其内部采用泛型化的 `CG-UE1` 和 `CG-UE2` 子节点来分别表征当前混合组合中的第一能力域（eMBB per-slot）与第二能力域（RedCap/FR2 per-group）。这种嵌套式的 ASN.1 结构不仅使得 UE 上报四个局部瓶颈标量（Sub-capacity Scarlars）的逻辑极其清晰，也为基站侧 RRC 配置合法性校验提供了一张天然的二维映射网格，确保调度配置中的 `BlindDetection3` 和 `BlindDetection4` 受到精准的硬隔离约束。**
+
+## 📖 协议原文拆解 (五十四)：混搭公文包里的“大账与小账”之 R15 常规产线篇
+
+> **协议原文**
+> If the UE reports pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList1,
+> - the value range of pdcch-BlindDetectionCG-UE1 for the MCG or of pdcch-BlindDetectionCG-UE1 for the SCG is [0, 1, …, pdcch-BlindDetectionCA1], and
+> - pdcch-BlindDetectionCG-UE1 for the MCG + pdcch-BlindDetectionCG-UE1 for the SCG >= pdcch-BlindDetectionCA1.
+> Otherwise, if $N_{cells}^{DL,NR-DC,max,r15}$ is a maximum total number of downlink cells for which the UE is provided monitoringCapabilityConfig = r15monitoringcapability and the UE is configured on both the MCG and the SCG for NR-DC as indicated in UE-NR-Capability
+> - the value range of pdcch-BlindDetectionCG-UE1 for the MCG or of pdcch-BlindDetectionCG-UE1 for the SCG is [0, 1, 2],
+> - pdcch-BlindDetectionCG-UE1 for the MCG + pdcch-BlindDetectionSCG-UE1 for the SCG >= $N_{cells}^{DL,NR-DC,max,r15}$.
+
+*(注：协议最后一句原文 `pdcch-BlindDetectionSCG-UE1 for the SCG` 存在命名笔误，应与其前文新采用的公文包统一结构 `pdcch-BlindDetectionCG-UE1 for the SCG` 保持一致，不过 ASN.1 字典解析中实质指向是明确的。)*
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList1**：混搭菜单 1 里的 R15 总算力天花板。**一句话解释**：手机提交的“外卖+快递”综合体检表里，专门声明的“送普通外卖（R15）”的总能力值。
+* **pdcch-BlindDetectionCG-UE1**：公文包里的 R15 局部上限（前一段刚介绍过，分别用于 MCG 和 SCG）。
+
+### 🚪 第一关：换汤不换药的“溢出与断电”
+这段协议处理的是：**在 R15 + R17 混搭的大背景下，专门针对 R15（常规产线）这半壁江山的具体数值约束。**
+逻辑上，它和我们在第（五十）段见到的 R15+R16 混搭中的常规产线规则，是**连标点符号都一模一样**的（仅仅是外层套了一个 `MixedList1` 的公文包路径）。
+
+* **第一大特点（允许单边断电）**：值域包含 `0`。这意味着，为了保住 R17 极高频业务的稳定，手机完全有权在主辅基站的某一边，彻底关闭 R15 常规业务的接收（填 0），实现彻底的业务物理隔离。
+* **第二大特点（溢出汇报法）**：主辅两边填的极限值加起来，必须 `>=` 总能力（CA1）。这个 $\ge$ 继续赋予了基站调度时极其宝贵的动态倾斜（软资源池共享）能力。
+
+### 🎯 第二关：如果不交体检表？(宽容的缺省惩罚)
+再看 Otherwise（缺省）分支。如果手机在建立双连接时，没交这份混搭专项体检表。
+基站怎么算？
+* **天花板**：直接按物理上配置了几个 R15 小区来算（$N_{cells}^{max,r15}$）。
+* **局部值域**：限制在 `[0, 1, 2]`。
+
+请回想一下，这和我们在（五十一）段看到的 R16 极速缺省惩罚（死死锁在 `[0,1]`，最高只能为 1）形成了鲜明对比！
+由于现在这条产线是 **R15 (按天结，per slot)**，对底层芯片的瞬时处理压力并不致命，所以协议依然大度地给了 `[0, 1, 2]` 的宽容范围。即使你偷懒没交底细，单边基站最多也能给你塞 2 个小区的并发常规任务，而不必像极速任务那样严苛阻断。
+
+### 🔄 混搭模式下 R15 产线的数值框定流
+```text
+【在 R15+R17 双连接混搭中，手机填报 R15 局部上限 (CG-UE1)】
+
+        ├─► 有在混搭菜单中提交 R15 专属总能力 CA1 吗？
+        │
+        ├──► 【有交 (假设 CA1=5)】
+        │       └─► 填表自由：主辅皆可在 [0, 1, 2, 3, 4, 5] 任意填！
+        │           核验公式：[主 CG-UE1] + [辅 CG-UE1] >= 5 即可通过！
+        │
+        └──► 【没交】
+                └─► 启动宽容缺省模式：
+                    填表限制：主辅最高只能填到 2 (即范围 [0, 1, 2])
+                    核验公式：加起来必须 >= 当前 R15 物理小区总数
+```
+
+### 💡 章节硬核总结
+
+**本段协议是 3GPP “同构逻辑，多域复用（Isomorphic Logic over Multi-domain Re-use）”法则的经典演绎。在将 L1 监控配置上下文（Context）切换到 `MixedList1` 容器内部后，针对其 `UE1`（即 eMBB per-slot 域）的能力界定，协议直接平移了原有的放宽型不等式约束。允许 `0` 值的能力上报（Capability Zero-reporting）维持了基带跨频段切片（Band Slicing）的硬件隔离自由度；而 `[0, 1, 2]` 的回退范围（Fallback Range）则映射了 eMBB 时隙级盲检对 DSP Core 低时效性的容忍度。这证明了在无论多么复杂的 RRC 外层嵌套结构下，3GPP 对底层的物理承载压力的判断标准始终具有绝对的一致性。**
+
+## 📖 协议原文拆解 (五十五)：混搭公文包里的“大账与小账”之 R17 佛系产线篇
+
+> **协议原文**
+> If the UE reports pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList1
+> - the value range of pdcch-BlindDetectionCG-UE2 for the MCG or of pdcch-BlindDetectionCG-UE2 for the SCG is [0, 1, …, pdcch-BlindDetectionCA3], and
+> - pdcch-BlindDetectionCG-UE2 for the MCG + pdcch-BlindDetectionCG-UE2 for the SCG >= pdcch-BlindDetectionCA2.
+> Otherwise, if $N_{cells}^{DL,NR-DC,max,r17}$ is a maximum total number of downlink cells for which the UE is provided monitoringCapabilityConfig = r17monitoringcapability and the UE is configured on both the MCG and the SCG for NR-DC as indicated in UE-NR-Capability
+> - the value range of pdcch-BlindDetectionCG-UE2 for the MCG or of pdcch-BlindDetectionCG-UE2 for the SCG is [0, 1, 2],
+> - pdcch-BlindDetectionCG-UE2 for the MCG + pdcch-BlindDetectionCG-UE2 for the SCG >= $N_{cells}^{DL,NR-DC,max,r17}$.
+
+*(注：此处 3GPP 行文再次出现了一处经典的笔误！第一个 bullet 点中的 `[..., pdcch-BlindDetectionCA3]` 在上下文逻辑中绝对应该是 `CA2`。因为我们在处理 `MixedList1` 且正在约束 `CA2`。3GPP 定稿编辑在跨代合并时没把下标统一过来，但底层 ASN.1 解析逻辑不受影响。)*
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionCG-UE2**：公文包里的 R17 局部上限。**一句话解释**：专门用来卡死第 4 代账本（R17 佛系按周结模式）的局部配额上限。
+
+### 🚪 第一关：镜像克隆！R17 产线同样享有“断电权”和“动态溢出”
+既然上一段把混搭模型里 R15 产线的账算清了，这段自然是来算另一半江山——**R17 (极高频/养生模式) 产线**的账。
+一模一样的底层框架逻辑：
+* **包含 0 (允许单边罢工)**：手机为了保住另一侧的 R15 业务不出错，完全有权利在某一个基站上，彻底关闭 R17 的处理线程（报 0），实现极端的专职化。
+* **溢出上报 ($\ge$ 守恒)**：主基站和辅基站各自报的 R17 局部极限，加在一起必须 `大于等于` 手机整体承接 R17 的总算力（CA2）。用这种溢出来告知基站自己内部存在“算力资源池的软共享”，任凭基站灵活分配。
+
+### 🎯 第二关：宽容的缺省惩罚再现！(对比 R16)
+我们再把目光聚焦到 `Otherwise`（如果手机没交体检表）的缺省分支上。
+它这里规定的值域范围是：**`[0, 1, 2]`**。
+
+这又是一个极其生动的证明！
+大家还记得在第（五十一）段拆解 **R16 极速产线** 时，协议因为怕烧芯片，在缺省状态下把上限残酷地锁死在了 `[0, 1]` 吗？
+现在这是 **R17 佛系产线 (per group of Xs slots)**。因为它是“按周结”，时间被大大拉长，哪怕频段再高，瞬时的算力密度也被稀释了。所以协议认为它和 R15 一样是“相对安全”的。
+哪怕你没交总能力底牌，协议也敢对你宽大处理，放宽到 `[0, 1, 2]`，允许基站单边最多给你派 2 个当量的 R17 盲检任务。
+
+### 🔄 混搭模式三大产线的缺省惩罚力度对比
+```text
+【当终端未上报全局能力时，单边基站局部能力上限的缺省值域】
+
+ ├─ 常规业务 (R15, 按天结) ──────► 放宽：[0, 1, 2]  (瞬时压力适中)
+ │
+ ├─ 极速业务 (R16, 按微秒结) ────► 锁死：[0, 1]     (瞬时压力爆表，必须严防死守！)
+ │
+ └─ 养生业务 (R17, 按周大周期结) ─► 放宽：[0, 1, 2]  (瞬时压力被长周期平摊，恢复宽容)
+```
+
+### 💡 章节硬核总结
+
+**本段协议完成了 NR-DC + MixedList1 (R15+R17) 拓扑下第二能力域（RedCap/FR2-2）边界条件收敛。通过在此处维持了与 R15 相同的 `[0, 1, 2]` 缺省回退范围（Fallback Value Range），3GPP 在数学约束层面上实质性地认定了：R17 的 `per group of slots` 盲检架构在对基带译码器的瞬时突发吞吐量（Burst Throughput Requirement）压榨上，已经成功降维到了与 eMBB (`per slot`) 相似的量级，从而彻底摆脱了 URLLC (`per span`) 所面临的极度算力危机。协议对各种特征维度的深刻物理理解，就如此巧妙地隐藏在这区区几个阿拉伯数字的取值范围差异之中。**
+
+## 📖 协议原文拆解 (五十六)：冰火极端混搭的“守恒定律” (R16+R17 配额下发限制)
+
+> **协议原文**
+> When a UE is configured for NR-DC operation with a total of $N_{cells}^{DL,NR-DC}$ downlink cells on both the MCG and the SCG and the UE is provided monitoringCapabilityConfig = r16monitoringcapability for $N_{NR-DC,r16}^{DL,cells}$ downlink cells and monitoringCapabilityConfig = r17monitoringcapability for $N_{NR-DC,r17}^{DL,cells}$ downlink cells where the UE monitors PDCCH, the UE expects to be provided pdcch-BlindDetection2 and pdcch-BlindDetection4 for the MCG, and pdcch-BlindDetection2 and pdcch-BlindDetection4 for the SCG with values that satisfy
+> - pdcch-BlindDetection2 for the MCG + pdcch-BlindDetection2 for the SCG <= pdcch-BlindDetectionCA1, if the UE reports pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList2, or
+> - pdcch-BlindDetection2 for the MCG + pdcch-BlindDetection2 for the SCG <= $N_{NR-DC,r16}^{DL,cells}$, if the UE does not report pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList2
+> 
+> and
+> - pdcch-BlindDetection4 for the MCG + pdcch-BlindDetection4 for the SCG <= pdcch-BlindDetectionCA2, if the UE reports pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList2, or
+> - pdcch-BlindDetection4 for the MCG + pdcch-BlindDetection4 for the SCG <= $N_{NR-DC,r17}^{DL,cells}$, if the UE does not report pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList2
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionMixedList2**：混搭菜单 2。**一句话解释**：我们在第（四十一）段提到过，这是专门给最极端的“极速(R16) + 养生(R17)”混搭组合准备的能力菜单。
+* **pdcch-BlindDetection2 (2代账本)**：控制极速 R16 业务的配额参数。
+* **pdcch-BlindDetection4 (4代账本)**：控制大周期 R17 业务的配额参数。
+
+### 🚪 第一关：地狱难度的派单检查，依然是相同的“配方”
+现在网络来到了最变态的并发状态：手机不但开启了双基站（NR-DC），还要同时处理**极快（R16, 按微秒结）**和**极慢（R17, 按几周结）**的两种业务。
+基站这时候该怎么给主、辅基站分配算力任务呢？
+
+协议依然坚守最底层的物理隔离防线：
+* 基站必须老老实实用 **2代账本** 专门发极速配额。
+* 基站必须老老实实用 **4代账本** 专门发大周期配额。
+然后，手机的底层拦截机制（`UE expects`）再次举起计算器，进行严格的双线合规验算。
+
+### 🎯 第二关：双线核对防爆机制 (<= 红线)
+验证逻辑和之前的任何一种双连接混搭如出一辙，核心就是**“两边之和绝不能大于总预算”**。
+
+1. **查 2代极速账本 (R16)**：
+   主基站的 2代配额 + 辅基站的 2代配额。
+   * 如果交了 `MixedList2` 菜单，那就和菜单上的 **CA1**（在这里代指第一项 R16 预算）比对，绝不能超过它。
+   * 如果没交，绝不能超过实际配置的极速频段数（$N_{r16}$）。
+
+2. **查 4代大周期账本 (R17)**：
+   主基站的 4代配额 + 辅基站的 4代配额。
+   * 如果交了 `MixedList2` 菜单，那就和菜单上的 **CA2**（在这里代指第二项 R17 预算）比对，绝不能超过它。
+   * 如果没交，绝不能超过实际配置的大周期频段数（$N_{r17}$）。
+
+*(注：大家发现了没有？这里的 CA1 代表了 R16，CA2 代表了 R17。而在前面 R15+R17 混搭时，CA1 是 R15，CA2 是 R17。在 3GPP 中，这种 Tuple (元组) 的参数名是相对占位符，它代表的是当前 `MixedList` 容器里的第一项和第二项，而不带绝对业务属性，全看外部语境如何定义。)*
+
+### 🔄 冰火两重天的双线隔离配置图
+```text
+【R16 (极速) + R17 (跨周期) 混合双连接配置校验】
+
+   (2 代账本：负责高爆发)            (4 代账本：负责深缓存)
+   [ MCG-2 ]  [ SCG-2 ]             [ MCG-4 ]  [ SCG-4 ]
+       │          │                     │          │
+       └────+─────┘                     └────+─────┘
+            ▼                                ▼
+       【必须 <= CA1】                   【必须 <= CA2】
+   (MixedList2的极速总限额)          (MixedList2的跨周期总限额)
+
+(只有两套账本双双算对，这套极端的调度配置才会通过手机底层驱动的审查而生效)
+```
+
+### 💡 章节硬核总结
+
+**本段协议完成了 NR-DC 在 `MixedList2` (R16+R17) 拓扑下的 RRC 算力配额下发规则约束。通过在数学形式上的完美对称复制，3GPP 展示了其处理组合爆炸（Combinatorial Explosion）问题的工程智慧：即通过极其有限的正交参数集（`BlindDetection1/2/3/4`），覆盖了单 Numerology、双 Numerology 混搭以及未来潜在的 N-Numerology 混搭在多基站架构下的所有配置分发校验。本段中的 `UE expects` 保证了即使在最极端、最容易引发缓存溢出的 URLLC 与 RedCap/FR2 业务混跑场景下，网络侧的物理算力切片依然能在各自孤立的数学维度内达成严格收敛。**
+
+## 📖 协议原文拆解 (五十七)：冰火两重天的“四维局部底牌” (嵌套公文包的应用)
+
+> **协议原文**
+> When a UE is configured for NR-DC operation and is provided monitoringCapabilityConfig = r16monitoringcapability for at least one downlink cell and monitoringCapabilityConfig = r17monitoringcapability for at least one downlink cell where the UE monitors PDCCH, the UE may indicate, through pdcch-BlindDetectionCG-UE1 in pdcch-BlindDetectionMCG-UE-Mixed and pdcch-BlindDetectionCG-UE1 in pdcch-BlindDetectionSCG-UE-Mixed, respective maximum values for pdcch-BlindDetection2 for the MCG and pdcch-BlindDetection2 for the SCG, and through pdcch-BlindDetectionCG-UE2 in pdcch-BlindDetectionMCG-UE-Mixed and pdcch-BlindDetectionCG-UE2 in pdcch-BlindDetectionSCG-UE-Mixed, respective maximum values for pdcch-BlindDetection4 for the MCG and pdcch-BlindDetection4 for the SCG.
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionMCG-UE-Mixed / SCG-UE-Mixed**：混搭模式专属的局部能力“公文包”。我们在第（五十三）段已经见过它，它是一个外层容器，用来同时向基站提交多个业务维度的局部上限。
+
+### 🚪 第一关：旧公文包，新装填物 (灵活的容器复用)
+在第（五十三）段中，协议为了解决 R15+R17 混搭的四维上报，发明了这个带 `-Mixed` 后缀的嵌套结构公文包。
+现在场景换成了最极端的 **R16(极速) + R17(极高频大周期)** 混搭。
+3GPP 协议展现出了高级编程语言中**“多态/泛型（Polymorphism/Generics）”**的特征：
+协议并没有去发明一个全新的“公文包名字”，而是**继续复用了这个 `-Mixed` 容器！**
+只是容器内部的“指针指向（目标映射）”发生了改变。
+
+### 🎯 第二关：重新绑定底层映射规则
+由于业务成分变了，这次手机上交公文包后，基站解析这些文件的映射关系变成了这样：
+
+**关于主基站 (MCG) 的公文包：**
+* 包里的 `UE1` ──► 这次它锁死的不再是常规 R15，而是**极速 R16 的配额 (`BlindDetection2 for MCG`)**！
+* 包里的 `UE2` ──► 它依然锁死大周期 R17 的配额 (`BlindDetection4 for MCG`)。
+
+**关于辅基站 (SCG) 的公文包：**
+* 包里的 `UE1` ──► 锁死辅基站的极速 R16 配额 (`BlindDetection2 for SCG`)。
+* 包里的 `UE2` ──► 锁死辅基站的大周期 R17 配额 (`BlindDetection4 for SCG`)。
+
+**生活类比**：
+你在跟总部汇报。总部给了你两个统一规格的“汇报表单（UE-Mixed）”，一个写东区，一个写西区。
+表单里固定只有两栏：【业务1上限】和【业务2上限】。
+* 昨天你接的是“普通+大件”活，你默认栏目 1 填的是普通活（R15）上限，栏目 2 填的是大件（R17）上限。
+* 今天你接的是“加急+大件”活，表单名字没变，但你和总部都心照不宣：栏目 1 现在代表的是**加急活（R16）**的上限，栏目 2 依然代表大件活（R17）的上限。
+这种结构复用，极大节省了协议在定义数据结构（ASN.1 IE）时的复杂度和冗余度。
+
+### 🔄 冰火混搭 (R16+R17) 的嵌套映射架构
+```text
+【手机上报局部瓶颈，限制基站的瞎排班】
+
+[主基站公文包 MCG-UE-Mixed]                     [辅基站公文包 SCG-UE-Mixed]
+ │                                               │
+ ├─ 📂 CG-UE1: (当前语境下指代 R16 极速)            ├─ 📂 CG-UE1: (当前语境下指代 R16 极速)
+ │    └─ 死死卡住 ──► (BlindDetection2 for MCG)  │    └─ 死死卡住 ──► (BlindDetection2 for SCG)
+ │                                               │
+ └─ 📂 CG-UE2: (当前语境下指代 R17 养生)            └─ 📂 CG-UE2: (当前语境下指代 R17 养生)
+      └─ 死死卡住 ──► (BlindDetection4 for MCG)       └─ 死死卡住 ──► (BlindDetection4 for SCG)
+```
+
+### 💡 章节硬核总结
+
+**本段协议在 RRC 信令交互层面上，展示了 ASN.1 数据结构（Data Structure）的上下文强相关性（Context Dependency）。通过复用 `pdcch-BlindDetectionMCG/SCG-UE-Mixed` 容器结构，协议避免了为每一种可能的 Mixed CA 组合去硬编码无休止的新 IE 变量。在明确了当前环境为 R16+R17 组合后，容器内的泛型变量 `CG-UE1` 自动发生语义重载（Semantic Overloading），其约束对象从 R15 的 `BlindDetection3` 平滑过渡到了 R16 的 `BlindDetection2`。这既满足了 UE 暴露其极速与极慢双重硬件瓶颈的需求，又彰显了通信标准在定义底层信令接口时对信令开销（Signaling Overhead）与可维护性的极致追求。**
+
+## 📖 协议原文拆解 (五十八)：混搭公文包里的极速审判！(R16 产线的严苛值域)
+
+> **协议原文**
+> If the UE reports pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList2,
+> - the value range of pdcch-BlindDetectionCG-UE1 for the MCG or of pdcch-BlindDetectionCG-UE1 for the SCG is [0, 1, …, pdcch-BlindDetectionCA1], and
+> - pdcch-BlindDetectionCG-UE1 for the MCG + pdcch-BlindDetectionCG-UE1 for the SCG >= pdcch-BlindDetectionCA1.
+> Otherwise, if $N_{cells}^{DL,NR-DC,max,r16}$ is a maximum total number of downlink cells for which the UE is provided monitoringCapabilityConfig = r16monitoringcapability and the UE is configured on both the MCG and the SCG for NR-DC as indicated in UE-NR-Capability
+> - the value range of pdcch-BlindDetectionCG-UE1 for the MCG or of pdcch-BlindDetectionCG-UE1 for the SCG is [0, 1],
+> - pdcch-BlindDetectionCG-UE1 for the MCG + pdcch-BlindDetectionCG-UE1 for the SCG >= $N_{cells}^{DL,NR-DC,max,r16}$.
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList2**：冰火混搭菜单（List2）里的第 1 项总算力。由于这是 R16+R17 混搭，所以这个 `CA1` 在这里的实际身份是**极速 (R16) 算力天花板**。
+* **pdcch-BlindDetectionCG-UE1**：公文包里的第 1 栏目。在此语境下代表**极速 (R16) 局部算力上限**。
+
+### 🚪 第一关：换上马甲，依然允许“极速产线拔电源”
+这段协议专门负责界定在 R16+R17 混搭下，公文包里那个代表极速业务（R16）的字段，该怎么填数值。
+* **老规矩（溢出汇报法）**：主辅两边的极速局部能力上限，加起来必须 `>=` 极速总能力（CA1）。让基站自由倾斜分配。
+* **特权（包含 0 值）**：范围是 `[0, 1, ..., CA1]`。在双连接下，手机完全可以宣称自己某一个基带模块不接任何极速业务，把 R16 全部压给另一个基站模块处理。
+
+### 🎯 第二关：如果不交底牌，死刑伺候！(锁死在 [0,1])
+看到这里，不得不佩服 3GPP 协议制定者在底层逻辑上近乎偏执的“一致性强迫症”。
+再来看看 `Otherwise`（缺省，未交体检报告）分支！
+
+由于当前填写的这个栏目（UE1），在当前上下文（MixedList2）里代表的是**极其吃性能、容易烧芯片的极速 R16 业务**。
+所以协议在缺省值域上，再次祭出了毫不容情的极刑大棒：
+**`the value range is [0, 1]`。**
+绝不允许报 2 或 3！因为你不报总盘子，基站就不敢对你有任何高估。为了防止微秒级的 Span 把你冲爆，哪怕你两边加起来符合条件，基站给你分配的极限任务也被物理锁死在每侧最多 1 个载波当量！
+
+*(注：请与第五十四段对比。当时 UE1 代表的是 R15 常规业务，所以哪怕没交体检报告，缺省值域也是宽容的 `[0, 1, 2]`。这就是协议对物理特性的极度敏锐！)*
+
+### 🔄 混搭模式下极速产线 (R16) 的值域约束判决
+```text
+【在 R16+R17 双连接混搭中，手机填报极速 R16 局部上限 (CG-UE1)】
+
+        ├─► 有在混搭菜单(List2)中提交极速专属总能力 CA1 吗？
+        │
+        ├──► 【有交】
+        │       └─► 填表自由：主辅皆可在 [0, 1, ..., 满值] 任意填！
+        │           核验公式：[主 CG-UE1] + [辅 CG-UE1] >= 满值！
+        │
+        └──► 【没交】
+                └─► 触发底线极速惩罚！
+                    填表限制：主辅最高只能填到 1 (即范围死死锁在 [0, 1])！
+                    核验公式：加起来必须 >= 当前 R16 物理小区总数 N_r16！
+                    (这同样意味着在这种缺省下，N_r16的物理上限只能是 2)
+```
+
+### 💡 章节硬核总结
+
+**本段协议是 5G L1 对 `r16monitoringcapability` (URLLC per-span) 极度严苛的算力保护政策在多级嵌套 RRC 容器中的递归体现（Recursive Embodiment）。当解析至 `pdcch-BlindDetectionMixedList2` 容器内部的 `CG-UE1` 字段时，协议引擎感知到了该字段在当前 Context 下映射的物理实体为 R16 Span 译码管线。因此，在其对应的隐式回退（Fallback）逻辑中，立刻将值域空间（Value Range）执行了断崖式截断，强行钳制为 `[0, 1]`。这种“见 R16 即启动顶格保护”的设计理念贯穿了整个第 10 章的算力核算体系，确保了极低延迟信道不会成为基带发生 Buffer Overflow 的阿喀琉斯之踵。**
+
+## 📖 协议原文拆解 (五十九)：混搭公文包的最后收口！R17 佛系产线的宽大处理
+
+> **协议原文**
+> If the UE reports pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList2
+> - the value range of pdcch-BlindDetectionCG-UE2 for the MCG or of pdcch-BlindDetectionCG-UE2 for the SCG is [0, 1, …, pdcch-BlindDetectionCA2], and
+> - pdcch-BlindDetectionCG-UE2 for the MCG + pdcch-BlindDetectionCG-UE2 for the SCG >= pdcch-BlindDetectionCA2.
+> Otherwise, if $N_{cells}^{DL,NR-DC,max,r17}$ is a maximum total number of downlink cells for which the UE is provided monitoringCapabilityConfig = r17monitoringcapability and the UE is configured on both the MCG and the SCG for NR-DC as indicated in UE-NR-Capability
+> - the value range of pdcch-BlindDetectionCG-UE2 for the MCG or of pdcch-BlindDetectionCG-UE2 for the SCG is [0, 1, 2],
+> - pdcch-BlindDetectionCG-UE2 for the MCG + pdcch-BlindDetectionCG-UE2 for the SCG >= $N_{cells}^{DL,NR-DC,max,r17}$.
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList2**：冰火混搭菜单（List2）里的第 2 项总算力。由于这是 R16+R17 混搭，所以这个 `CA2` 在这里的实际身份是**佛系大周期 (R17) 算力天花板**。
+* **pdcch-BlindDetectionCG-UE2**：公文包里的第 2 栏目。在此语境下代表**佛系大周期 (R17) 局部算力上限**。
+
+### 🚪 第一关：完美的对称美学 (R17 的局部上限与溢出)
+这段协议负责给整个 R16+R17 双连接混搭的参数申报画上最终句号。
+对于代表 R17 (按周结) 业务的 `CG-UE2` 字段：
+* 依然允许填 `0`，意味着手机可以向基站宣告：“我的辅基站不接长线任务了，全交给主基站去囤缓存！”
+* 依然必须满足溢出定理：两边上报的极限加起来必须 `>=` 总极限（CA2）。为基站调度长线任务提供充足的左右逢源（Load Balancing）空间。
+
+### 🎯 第二关：长周期的福利 (惩罚豁免，重回宽容)
+最令人极度舒适的一点，体现在 `Otherwise` (缺省) 分支的值域限制上。
+请看这里：**`the value range is [0, 1, 2]`**。
+
+* 在上一段（五十八段），因为处理的是微秒级要命的 **R16 极速业务**，缺省值域被残暴地锁死在 `[0, 1]`。
+* 在这一段，因为处理的是跨越多天的 **R17 长周期业务**，时间被极大拉长拉扁了，芯片有充足的喘息期。所以，就算你偷懒没交底线报告，协议对你的缺省惩罚也轻得多，直接放宽回到了 `[0, 1, 2]`。
+这再次在最底层的参数设计上，印证了 3GPP 对不同业务带来的真实硅片热耗散（Thermal Dissipation）和瞬时内存压力（Memory Pressure）的极致把控。
+
+### 🔄 MixedList2 混合公文包 (R16+R17) 缺省值域对比总结
+```text
+【当手机偷懒没交底细时，基站如何利用缺省值域进行排班防爆？】
+
+面对手机发来的公文包 (CG-UE 文件夹)：
+        │
+        ├─► 拆开第一层：CG-UE1 (此时代表 R16 极速)
+        │      └─► 🚨 危险！极速业务极其吃算力！
+        │          基站配置锁死：最多只能在这个格子填 1！(范围 [0, 1])
+        │
+        └─► 拆开第二层：CG-UE2 (此时代表 R17 大周期)
+               └─► ☕ 安全！大周期业务有足够的时间缓冲！
+                   基站配置放宽：允许在这个格子填到 2！(范围 [0, 1, 2])
+```
+
+### 💡 章节硬核总结
+
+**本段协议为 5G Rel-17 的多节点混合调度体系献上了完美的终局验证（Terminal Verification）。至此，关于 `pdcch-BlindDetectionMixedList2` 嵌套结构的解析全部完成。我们清晰地看到了 3GPP 协议设计中的“物理法则投射（Projection of Physical Laws）”：即使在极其抽象、嵌套数层的 ASN.1 RRC 变量树中，只要变量的指针（Pointer）最终指向了具备长时序积分特征（per group of slots）的 R17 盲检实体，其对应的 Fallback 保护域（Value Range）就会自动弛豫（Relaxation）为相对宽容的 `[0, 1, 2]`。这种通过控制信令值域上限来硬编码底层基带物理安全边界的手法，是移动通信工业标准有别于普通软件协议的独特魅力。**
+
+## 📖 协议原文拆解 (六十)：三界会师！“常规+极速+养生”双连接的六维算力分割
+
+> **协议原文**
+> When a UE is configured for NR-DC operation with a total of $N_{NR-DC}^{DL,cells}$ downlink cells on both the MCG and the SCG and the UE is provided monitoringCapabilityConfig = r15monitoringcapability for $N_{NR-DC,r15}^{DL,cells}$ downlink cells, monitoringCapabilityConfig = r16monitoringcapability for $N_{NR-DC,r16}^{DL,cells}$ downlink cells, and monitoringCapabilityConfig = r17monitoringcapability for $N_{NR-DC,r17}^{DL,cells}$ downlink cells where the UE monitors PDCCH, the UE expects to be provided pdcch-BlindDetection3, pdcch-BlindDetection2, and pdcch-BlindDetection4 for the MCG, and pdcch-BlindDetection3, pdcch-BlindDetection2, and pdcch-BlindDetection4 for the SCG with values that satisfy
+> - pdcch-BlindDetection3 for the MCG + pdcch-BlindDetection3 for the SCG <= pdcch-BlindDetectionCA1, if the UE reports pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList3, or
+> - pdcch-BlindDetection3 for the MCG + pdcch-BlindDetection3 for the SCG <= $N_{NR-DC,r15}^{DL,cells}$, if the UE does not report pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList3
+> 
+> and
+> - pdcch-BlindDetection2 for the MCG + pdcch-BlindDetection2 for the SCG <= pdcch-BlindDetectionCA2, if the UE reports pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList3, or
+> - pdcch-BlindDetection2 for the MCG + pdcch-BlindDetection2 for the SCG <= $N_{NR-DC,r16}^{DL,cells}$, if the UE does not report pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList3
+> 
+> and
+> - pdcch-BlindDetection4 for the MCG + pdcch-BlindDetection4 for the SCG <= pdcch-BlindDetectionCA3, if the UE reports pdcch-BlindDetectionCA3 in pdcch-BlindDetectionMixedList3, or
+> - pdcch-BlindDetection4 for the MCG + pdcch-BlindDetection4 for the SCG <= $N_{NR-DC,r17}^{DL,cells}$, if the UE does not report pdcch-BlindDetectionCA3 in pdcch-BlindDetectionMixedList3
+
+### 📚 增量术语表
+* **Triple Mixed CA (R15+R16+R17)**：终极大混搭载波聚合。**一句话解释**：手机同时承载着“按天结”的常规频段、“按微秒结”的极速频段、以及“按周结”的极高频养生频段。5G 调度的地狱难度。
+* **pdcch-BlindDetectionMixedList3**：混合算力套餐列表第 3 版 (终极版)。**一句话解释**：给三色全开配置定制的终极体检报告。里面同时装着 `CA1, CA2, CA3` 三大总配额。
+
+### 🚪 第一关：手机里的“六大平行宇宙”
+恭喜各位，我们终于爬到了 5G PDCCH 盲检能力配置（Capability Negotiation）这座极其繁杂的高山的最高点！
+这是协议里能够出现的**最庞大、最复杂的物理拓扑组合**：
+手机挂着双基站（MCG 和 SCG）。在这两个基站下面，各自都同时在跑三种完全不同结算周期的业务：
+* R15 常规（按天结）
+* R16 极速（按小时/微秒结）
+* R17 养生（按周/大周期结）
+
+为了在物理底层彻底隔离这三种完全不同脾气的业务，防止它们互相抢夺内存和译码器资源，基带芯片必须在内部划出 **6 个绝对隔离的处理沙盒（Sandboxes）**。
+
+### 🎯 第二关：六本账册的“守恒对账单”
+基站想要给这 6 个沙盒发任务，必须同时下发 **6 本账册**。
+而且，这 6 本账册必须严格遵守各自领域的“能量守恒定律”，手机（通过 `UE expects`）会充当最严厉的财务审计员：
+
+**【账单 1：R15 常规流水线】(看 3 号账本)**
+* [主站分到的 3号 配额] + [辅站分到的 3号 配额]
+* 必须 `<=` 终极菜单里的 **CA1**（常规总预算）或 $N_{NR-DC,r15}^{DL,cells}$ 物理频段数。
+
+**【账单 2：R16 极速流水线】(看 2 号账本)**
+* [主站分到的 2号 配额] + [辅站分到的 2号 配额]
+* 必须 `<=` 终极菜单里的 **CA2**（极速总预算）或 $N_{NR-DC,r16}^{DL,cells}$ 物理频段数。
+
+**【账单 3：R17 大周期流水线】(看 4 号账本)**
+* [主站分到的 4号 配额] + [辅站分到的 4号 配额]
+* 必须 `<=` 终极菜单里的 **CA3**（养生总预算）或 $N_{NR-DC,r17}^{DL,cells}$ 物理频段数。
+
+**任何一本账对不上，整个这套极其宏大的 RRC 调度配置指令，都会被手机底层驱动当场驳回、视为非法！**
+
+### 🔄 终极“三色全开”双基站算力分割阵列
+```text
+【基站向双连接终端下发 5G 全形态并发配置时的算力审计大屏】
+
+             [ 主基站 MCG 派单量 ]        [ 辅基站 SCG 派单量 ]        [ 终端物理承载力上限 ]
+──────────────────────────────────────────────────────────────────────────────────────────
+R15 业务：  (BlindDetection3_MCG)   +   (BlindDetection3_SCG)  <=  [ MixedList3 -> CA1 ]
+──────────────────────────────────────────────────────────────────────────────────────────
+R16 业务：  (BlindDetection2_MCG)   +   (BlindDetection2_SCG)  <=  [ MixedList3 -> CA2 ]
+──────────────────────────────────────────────────────────────────────────────────────────
+R17 业务：  (BlindDetection4_MCG)   +   (BlindDetection4_SCG)  <=  [ MixedList3 -> CA3 ]
+──────────────────────────────────────────────────────────────────────────────────────────
+
+*(这三条等式同时成立，是 5G 芯片在极限压榨下还能保持不崩溃的根本数学保障)*
+```
+
+### 💡 章节硬核总结
+
+**本段协议是 3GPP 第 10 章在 UE PDCCH Capability 维度的巅峰之作（Magnum Opus）。它将 eMBB (R15 per-slot)、URLLC (R16 per-span) 和 RedCap/FR2-2 (R17 per-group) 三大底层特性，与 NR-DC (Multi-Radio Dual Connectivity) 的拓扑维度进行了最终极的组合。在信令架构上，协议利用 `MixedList3` 和三组完全独立的 `pdcch-BlindDetectionX` 容器，构建了一个 $3 \times 2$ 的超维算力映射矩阵。更为深邃的是，通过三组并行的 `UE expects` 不等式，协议将这六个维度的调度配额强制收敛回了一个三维的物理基带极限向量 `(CA1, CA2, CA3)`。这种在极度膨胀的功能需求下，依然能保持数学模型的绝对正交（Orthogonality）与守恒（Conservation）的协议编写能力，堪称现代通信标准架构设计的范本。**
+
+## 📖 协议原文拆解 (六十一)：终极六维底牌！三色混搭双连接的“超级公文包”
+
+> **协议原文**
+> When a UE is configured for NR-DC operation and is provided monitoringCapabilityConfig = r15monitoringcapability for at least one downlink cell, monitoringCapabilityConfig = r16monitoringcapability for at least one downlink cell, and monitoringCapabilityConfig = r17monitoringcapability for at least one downlink cell where the UE monitors PDCCH, the UE may indicate, through pdcch-BlindDetectionCG-UE1 in pdcch-BlindDetectionMCG-UE-Mixed1 and pdcch-BlindDetectionCG-UE1 in pdcch-BlindDetectionSCG-UE-Mixed1 respective maximum values for pdcch-BlindDetection3 for the MCG and pdcch-BlindDetection3 for the SCG, through pdcch-BlindDetectionCG-UE2 in pdcch-BlindDetectionMCG-UE-Mixed1 and pdcch-BlindDetectionCG-UE2 in pdcch-BlindDetectionSCG-UE-Mixed1 respective maximum values for pdcch-BlindDetection2 for the MCG and pdcch-BlindDetection2 for the SCG, and through pdcch-BlindDetectionCG-UE3 in pdcch-BlindDetectionMCG-UE-Mixed1 and pdcch-BlindDetectionCG-UE3 in pdcch-BlindDetectionSCG-UE-Mixed1 respective maximum values for pdcch-BlindDetection4 for the MCG and pdcch-BlindDetection4 for the SCG.
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionMCG-UE-Mixed1 / SCG-UE-Mixed1**：升级版超级公文包（带 `-Mixed1` 后缀）。**一句话解释**：因为现在有 R15+R16+R17 三种业务了，以前只能装两份文件的老公文包不够用了，协议专门为这种终极混搭发明了能装三份文件的新型公文包。
+* **pdcch-BlindDetectionCG-UE3**：公文包里的 3 号文件。**一句话解释**：专门负责锁定第 4 代账本（R17 养生模式）局部上限的新字段。
+
+### 🚪 第一关：旧包换新包，装下“六大硬件瓶颈”
+在上一段（六十段），我们看到了基站发下来的“六本账册”。
+这段协议讲的是：**手机在接单之前，怎么向基站亮出自己这 6 个硬件模块各自的“短板底线”？**
+
+因为场景升级到了终极的**“三色全开”（R15+R16+R17）**，手机必须上报 6 个局部极限值。
+为了在信令上不显得乱七八糟，3GPP 再次对结构体进行了嵌套升级：启用了带有 **`-Mixed1`** 后缀的全新大文件夹。
+在这个超级大文件夹里，塞进了三个格子：`UE1`、`UE2`、`UE3`。
+
+### 🎯 第二关：萝卜拔了坑还在！六维硬连线映射
+手机上交这两个超级公文包（一个代表主基站 MCG，一个代表辅基站 SCG）后，里面文件的映射关系被协议写得死死的，绝不允许乱套：
+
+**主/辅基站公文包里的文件分工：**
+* 📁 **1 号文件 (CG-UE1)** ──► 死死锁住 **BlindDetection3**（R15 常规配额）。
+* 📁 **2 号文件 (CG-UE2)** ──► 死死锁住 **BlindDetection2**（R16 极速配额）。
+* 📁 **3 号文件 (CG-UE3)** ──► 死死锁住 **BlindDetection4**（R17 养生配额）。
+
+**生活类比**：
+你是一家巨型外卖代运营公司的区域总管（终端）。
+你手下有【东区配送站(MCG)】和【西区配送站(SCG)】。每个站都有三条独立的派送线：【普通单(R15)】、【闪送单(R16)】、【大件团购单(R17)】。
+为了防止总部（基站）瞎派单把你某个站点撑爆，你给总部发了两个名为 **`Mixed1`** 的加密压缩包：
+* 拆开《东区极限运力.Mixed1》：
+  - UE1 报表：东区普通单最多接 50 单。
+  - UE2 报表：东区闪送单最多接 10 单。
+  - UE3 报表：东区大件单最多接 20 单。
+西区的压缩包也是同样的格式。总部未来的排班系统，必须通过这 6 份报表的终极审核！
+
+### 🔄 终极三色混搭嵌套公文包结构图
+```text
+【R15 + R16 + R17 三维双连接局部能力上报架构】
+
+                    [ 手机终端 终极能力上报 ]
+                                │
+        ┌───────────────────────┴───────────────────────┐
+        ▼                                               ▼
+[主站公文包 MCG-UE-Mixed1]                     [辅站公文包 SCG-UE-Mixed1]
+ │                                              │
+ ├─ 📂 UE1: 锁定主站 R15 (BlindDet 3)             ├─ 📂 UE1: 锁定辅站 R15 (BlindDet 3)
+ ├─ 📂 UE2: 锁定主站 R16 (BlindDet 2)             ├─ 📂 UE2: 锁定辅站 R16 (BlindDet 2)
+ └─ 📂 UE3: 锁定主站 R17 (BlindDet 4)             └─ 📂 UE3: 锁定辅站 R17 (BlindDet 4)
+
+*(通过极为整齐对称的 ASN.1 树状信令结构，完美消解了物理层六维矩阵分配的混乱)*
+```
+
+### 💡 章节硬核总结
+
+**本段协议在 RRC 信令编码层面上为 5G PDCCH 监控机制的终极形态（Ultimate Concurrency）画上了句号。面对 NR-DC 叠加 Triple-Numerology 的六维状态空间，若继续沿用扁平化的参数定义，基带与网络侧的状态机将彻底陷入难以维护的代码泥潭。3GPP 在此展示了优雅的通信协议设计美学：通过引入全新的容器类型 `pdcch-BlindDetectionMCG/SCG-UE-Mixed1`，将原本的二维元组扩展为三维元组（`UE1`, `UE2`, `UE3`）。在语义绑定（Semantic Binding）上，协议强制执行了严格的正交配对：`UE1` 锚定 R15 的 `BlindDetection3`，`UE2` 锚定 R16 的 `BlindDetection2`，`UE3` 锚定 R17 的 `BlindDetection4`。这种底层硬件流水线能力的精准、结构化暴露，不仅赋予了调度器极限压榨多模基带潜能的权限，更构筑了防止异构信令风暴冲垮 L1 硅片的终极软件护城河。**
+
+## 📖 协议原文拆解 (六十二)：终极公文包解密之“常规业务” (R15 产线的守恒与宽容)
+
+> **协议原文**
+> If the UE reports pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList3,
+> - the value range of pdcch-BlindDetectionCG-UE1 for the MCG or of pdcch-BlindDetectionCG-UE1 for the SCG is [0, 1, …, pdcch-BlindDetectionCA1], and
+> - pdcch-BlindDetectionCG-UE1 for the MCG + pdcch-BlindDetectionCG-UE1 for the SCG >= pdcch-BlindDetectionCA1.
+> Otherwise, if $N_{cells}^{DL,NR-DC,max,r15}$ is a maximum total number of downlink cells for which the UE is provided monitoringCapabilityConfig = r15monitoringcapability and the UE is configured on both the MCG and the SCG for NR-DC as indicated in UE-NR-Capability
+> - the value range of pdcch-BlindDetectionCG-UE1 for the MCG or of pdcch-BlindDetectionCG-UE1 for the SCG is [0, 1, 2],
+> - pdcch-BlindDetectionCG-UE1 for the MCG + pdcch-BlindDetectionCG-UE1 for the SCG >= $N_{cells}^{DL,NR-DC,max,r15}$.
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList3**：终极三色菜单（List3）里的第 1 项总算力。由于这是 R15+R16+R17 的大锅烩，所以这个 `CA1` 在此语境下**死死锚定 R15 (常规业务) 的总算力天花板**。
+* **pdcch-BlindDetectionCG-UE1**：终极公文包里的 1 号文件。代表**常规业务 (R15) 局部算力上限**。
+
+### 🚪 第一关：换汤不换药的“溢出定理”
+在上一段，手机上交了包含三个栏目的终极公文包。
+这段协议开始逐一审查这三个栏目里填写的数字到底合不合法。首先被拉出来审查的是：**负责常规 R15 业务的 1 号文件 (`CG-UE1`)**。
+
+审查逻辑完美复刻了前面的规律：
+* **允许单边拔电源**：填写的数值可以是 `0`。这意味着，为了保住极速或者极高频的命脉，手机依然有权在主辅基站的某一边，彻底砍掉常规业务的处理能力。
+* **溢出上报**：主基站填的 1 号值 + 辅基站填的 1 号值，必须 `>=` 总的常规算力（CA1）。赋予基站自由倾斜分配常规任务的灵活性。
+
+### 🎯 第二关：日结业务的“宽大处理”
+再看 `Otherwise`（缺省，未交体检报告）分支。
+因为 1 号文件处理的是 **R15 常规业务（按天结，per slot）**，对芯片的瞬时压榨并不恐怖。
+所以，即便手机偷懒没交底细，协议依然仁慈地给出了 **`[0, 1, 2]`** 的宽容值域。
+这说明，在缺省状态下，基站最多敢给单边基站分配 2 个当量的 R15 常规盲检任务，而不用担心把基带烧掉。
+
+### 🔄 终极混搭下 R15 产线的数值框定流
+```text
+【在三色全开(R15+16+17)双连接中，审查 R15 局部上限 (CG-UE1)】
+
+        ├─► 有在终极菜单(List3)中提交 R15 专属总能力 CA1 吗？
+        │
+        ├──► 【有交】
+        │       └─► 填表自由：主辅皆可在 [0 到 满值] 任意填！
+        │           核验公式：[主 CG-UE1] + [辅 CG-UE1] >= 满值！
+        │
+        └──► 【没交】
+                └─► 启动宽容缺省模式：
+                    填表限制：主辅最高只能填到 2 (即范围 [0, 1, 2])
+                    核验公式：加起来必须 >= 当前 R15 物理小区总数
+```
+
+### 💡 章节硬核总结
+
+**本段协议在微观数值域上验证了 3GPP “Context-aware Capability Validation（基于上下文的能力校验）”的设计哲学。当解析引擎进入 `MixedList3` 这个包含三种时域颗粒度（per-slot, per-span, per-group）的终极 RRC 容器时，它首先针对代表 eMBB（per-slot）的 `CG-UE1` 字段执行校验。协议在这里毫无阻力地平移了前面所有混搭模式下对于 R15 产线的宽容法则：允许 `0` 值的极化配置（Polarized configuration），并在 Fallback 路径中保留 `[0, 1, 2]` 的安全缓冲范围。这确保了在极度复杂的调度状态机中，属于低优先级基础承载的 R15 盲检任务，其配置边界既不会越权占用其他两栖业务的资源池，也不会被过分严苛地一刀切死。**
+
+## 📖 协议原文拆解 (六十三)：终极公文包解密之“极速业务” (R16 产线的严防死守)
+
+> **协议原文**
+> If the UE reports pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList3,
+> - the value range of pdcch-BlindDetectionCG-UE2 for the MCG or of pdcch-BlindDetectionCG-UE2 for the SCG is [0, 1, …, pdcch-BlindDetectionCA2], and
+> - pdcch-BlindDetectionCG-UE2 for the MCG + pdcch-BlindDetectionCG-UE2 for the SCG >= pdcch-BlindDetectionCA2.
+> Otherwise, if $N_{cells}^{DL,NR-DC,max,r16}$ is a maximum total number of downlink cells for which the UE is provided monitoringCapabilityConfig = r16monitoringcapability and the UE is configured on both the MCG and the SCG for NR-DC as indicated in UE-NR-Capability
+> - the value range of pdcch-BlindDetectionCG-UE2 for the MCG or of pdcch-BlindDetectionCG-UE2 for the SCG is [0, 1],
+> - pdcch-BlindDetectionCG-UE2 for the MCG + pdcch-BlindDetectionCG-UE2 for the SCG >= $N_{cells}^{DL,NR-DC,max,r16}$.
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList3**：终极三色菜单（List3）里的第 2 项总算力。在此语境下，它**死死锚定 R16 (极速 URLLC 业务)** 的总算力天花板。
+* **pdcch-BlindDetectionCG-UE2**：终极公文包里的 2 号文件。代表**极速业务 (R16) 局部算力上限**。
+
+### 🚪 第一关：保持队形！极速产线的“弹性溢出”与“单边断电”
+接下来轮到审查终极公文包里的第 2 个文件了（负责极速 R16 业务的 `CG-UE2`）。
+对于好学生（交了 `CA2` 专项体检报告的）：
+* **允许断电 (含 0)**：面对要命的微秒级爆发任务，手机依然有权决定把某一侧基站的极速接收管线彻底关闭（填 0），全力保另外一侧。
+* **动态溢出 ($\ge$)**：主辅上报的上限之和必须溢出总算力，给基站预留“削峰填谷”的灵活调度空间。
+
+### 🎯 第二关：再现极刑！缺省状态下的“锁死惩罚”
+当我们再次把目光移向 `Otherwise`（缺省）分支时，熟悉的冷酷配方又回来了！
+
+由于 2 号文件审查的是 **R16 极速业务（按微秒/Span结）**，对芯片瞬时吞吐量的压榨达到了顶点。
+只要手机敢不交底细，协议立刻启动最严苛的物理防爆模式：
+**`the value range is [0, 1]`。**
+
+* 不管基站怎么想给你加塞任务，在缺省状态下，单边基站的极速并发任务**绝对不能超过 1 个小区当量**！
+* `[0, 1]` 的死锁，直接把极速调度的自由度降到了冰点，宁可降低网速和调度容量，也绝不能让基带芯片发生 Buffer 击穿导致整个手机死机。
+
+### 🔄 终极混搭下 R16 产线的数值框定流
+```text
+【在三色全开(R15+16+17)双连接中，审查 R16 局部上限 (CG-UE2)】
+
+        ├─► 有在终极菜单(List3)中提交 R16 专属总能力 CA2 吗？
+        │
+        ├──► 【有交】
+        │       └─► 填表自由：主辅皆可在 [0 到 满值] 任意填！
+        │           核验公式：[主 CG-UE2] + [辅 CG-UE2] >= 满值！
+        │
+        └──► 【没交】
+                └─► 触发最高级别防爆惩罚！
+                    填表限制：主辅最高只能填到 1 (即范围死死锁在 [0, 1])！
+                    核验公式：加起来必须 >= 当前 R16 物理小区总数 N_r16！
+                    (此条件直接反向卡死了 N_r16 在这种状态下最多只能是 2)
+```
+
+### 💡 章节硬核总结
+
+**本段协议是对 5G L1 层“木桶效应（Canvas Effect）”管理的一次精准重演。当解析器步入 `MixedList3` 容器的第二维度（即表征 URLLC per-span 的 `CG-UE2` 节点）时，协议的容忍度骤然收紧。与上一段 R15 宽容的 `[0, 1, 2]` Fallback 值域形成极度强烈的反差，本段将 R16 的隐式回退边界粗暴地一刀切断至 `[0, 1]`。这种将极低延迟（Low-latency）与极高瞬时算力（High-peak-compute）强绑定的物理特质，通过冰冷的 ASN.1 枚举范围（Enumeration Range）映射进了信令规范。它在终极并发架构中，再次牢牢守住了 URLLC 调度的硬件绝对安全底线。**
+
+## 📖 协议原文拆解 (六十四)：终极公文包解密之“养生业务” (R17 产线的重归宽容)
+
+> **协议原文**
+> If the UE reports pdcch-BlindDetectionCA3 in pdcch-BlindDetectionMixedList3
+> - the value range of pdcch-BlindDetectionCG-UE3 for the MCG or of pdcch-BlindDetectionCG-UE3 for the SCG is [0, 1, …, pdcch-BlindDetectionCA3], and
+> - pdcch-BlindDetectionCG-UE3 for the MCG + pdcch-BlindDetectionCG-UE3 for the SCG >= pdcch-BlindDetectionCA3.
+> Otherwise, if $N_{cells}^{DL,NR-DC,max,r17}$ is a maximum total number of downlink cells for which the UE is provided monitoringCapabilityConfig = r17monitoringcapability and the UE is configured on both the MCG and the SCG for NR-DC as indicated in UE-NR-Capability
+> - the value range of pdcch-BlindDetectionCG-UE3 for the MCG or of pdcch-BlindDetectionCG-UE3 for the SCG is [0, 1, 2],
+> - pdcch-BlindDetectionCG-UE3 for the MCG + pdcch-BlindDetectionCG-UE3 for the SCG >= $N_{cells}^{DL,NR-DC,max,r17}$.
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionCA3 in pdcch-BlindDetectionMixedList3**：终极三色菜单（List3）里的第 3 项总算力。在此语境下，它**死死锚定 R17 (佛系大周期业务)** 的总算力天花板。
+* **pdcch-BlindDetectionCG-UE3**：终极公文包里的 3 号文件。代表**佛系养生业务 (R17) 局部算力上限**。
+
+### 🚪 第一关：收官之战！三色矩阵最后一块拼图
+这是终极公文包里的最后一份文件，也是 3GPP 协议关于多载波、多版本混合盲检算力配置的**最后一段底层约束**。
+审查 3 号文件（`CG-UE3`）的逻辑依然遵循着雷打不动的物理层契约：
+* **包含 0 的值域**：支持彻底关闭单侧基站的 R17 处理线程，实现极致的跨节点业务专职化。
+* **$\ge$ 的溢出效应**：支持两侧局部预算之和溢出全网总预算，确保基站在长周期调度时依然能左右逢源、动态挪腾。
+
+### 🎯 第二关：长周期=低压力！缺省模式的“免刑令牌”
+让我们再一次欣赏 3GPP 协议在数值域设计上的极致工整：
+在 `Otherwise` (未上报能力底牌) 的缺省分支里，由于 3 号文件掌管的是 **R17 跨时隙组 (per group of Xs slots)** 业务。
+因为时域尺度被极大拉伸，瞬时的极化译码（Polar Decoding）压力被宽裕的时间窗彻底稀释。
+所以，协议立刻收起了上一段（六十三段）对待 R16 极速业务那套“死锁在 [0,1]”的酷刑。
+**R17 的缺省值域，毫无悬念地恢复到了 `[0, 1, 2]` 的宽容状态！**
+
+**生活类比回顾**：
+至此，我们已经看遍了三条流水线在外包不交体检报告时的默认惩罚：
+* **常规线 (R15, 日结)**：允许单边接 2 单。 (难度中等)
+* **加急线 (R16, 秒结)**：只准单边接 1 单！(会死人的，严防死守)
+* **大件线 (R17, 周结)**：允许单边接 2 单。 (慢慢做总能做完)
+
+### 🔄 终极混搭下 R17 产线的数值框定流
+```text
+【在三色全开(R15+16+17)双连接中，审查 R17 局部上限 (CG-UE3)】
+
+        ├─► 有在终极菜单(List3)中提交 R17 专属总能力 CA3 吗？
+        │
+        ├──► 【有交】
+        │       └─► 填表自由：主辅皆可在 [0 到 满值] 任意填！
+        │           核验公式：[主 CG-UE3] + [辅 CG-UE3] >= 满值！
+        │
+        └──► 【没交】
+                └─► 恢复宽容缺省模式：
+                    填表限制：主辅最高可以填到 2 (即范围 [0, 1, 2])
+                    核验公式：加起来必须 >= 当前 R17 物理小区总数 N_r17！
+```
+
+### 💡 章节硬核总结
+
+**本段协议为 5G Rel-17 的 PDCCH 盲检预算大系（Overbooking Budget System）敲下了终场定音的法槌。当解析器步入 `MixedList3` 的第三维度（表征 RedCap/FR2 per-group 的 `CG-UE3` 节点）时，协议在 Fallback 逻辑中完美复刻了 `[0, 1, 2]` 的弛豫值域（Relaxed Value Range）。至此，R15 的宽容、R16 的极刑、R17 的回归，在长达数十段的数学公式编织中，构成了一套蔚为大观且逻辑绝对自洽的 L1 约束框架。它向整个通信工业界证明：无论未来上层网络如何把不同时效（Numerology）、不同节点（DC）、不同载波（CA）的业务像俄罗斯俄罗斯方块一样疯狂堆叠，底层终端的基带硅片都能依靠这套极其工整、正交隔离、带有动态弹性和缺省防灾的 ASN.1 代数方程组，牢牢守住不崩溃的最后底线。**
+
+---
+*(长舒一口气)*
+**第 10 章最艰涩、最绕脑的“盲检算力矩阵配置”山峰，已经被我们彻底翻越了！**
+
