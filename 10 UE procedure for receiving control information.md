@@ -2694,6 +2694,7 @@ Per Slot  Per Span  Per Group
 > When a UE is configured for NR-DC operation with a total of $N_{NR-DC}^{DL,cells}$ downlink cells on both the MCG and the SCG and the UE is provided monitoringCapabilityConfig = r15monitoringcapability for $N_{NR-DC,r15}^{DL,cells}$ downlink cells and monitoringCapabilityConfig = r17monitoringcapability for $N_{NR-DC,r17}^{DL,cells}$ downlink cells where the UE monitors PDCCH, the UE expects to be provided pdcch-BlindDetection3 and pdcch-BlindDetection4 for the MCG, and pdcch-BlindDetection3 and pdcch-BlindDetection4 for the SCG with values that satisfy
 > - pdcch-BlindDetection3 for the MCG + pdcch-BlindDetection3 for the SCG <= pdcch-BlindDetectionCA1, if the UE reports pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList1, or
 > - pdcch-BlindDetection3 for the MCG + pdcch-BlindDetection3 for the SCG <= $N_{NR-DC,r15}^{DL,cells}$, if the UE does not report pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList1
+> 
 > and
 > - pdcch-BlindDetection4 for the MCG + pdcch-BlindDetection4 for the SCG <= pdcch-BlindDetectionCA2, if the UE reports pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList1, or
 > - pdcch-BlindDetection4 for the MCG + pdcch-BlindDetection4 for the SCG <= $N_{NR-DC,r17}^{DL,cells}$, if the UE does not report pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList1
