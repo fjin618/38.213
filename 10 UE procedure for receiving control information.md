@@ -2050,3 +2050,702 @@ UE 均启动 [does not expect] 防御机制，拒收超载控制信令！
 
 **本段协议是 3GPP 物理层调度模型在多版本（Multi-Release）特性叠加时的标准防御式编程（Defensive Programming in Protocol）。它严丝合缝地复制了 Rel-16 中解决 Mixed Numerology/Capability 的 Pareto 前沿协商机制，将其平移到了 R15 与 R17 混用的场景。在引入 R17 FR2-2 极高频组时隙调度的同时，不可避免地会遇到 UE 同时连接 sub-6GHz eMBB 载波的异构聚合场景。为防止两者在争夺基带内部共享 SRAM 或 MAC 层处理队列时发生不可预测的拥塞，协议启用了 `pdcch-BlindDetectionMixedList1`。通过这一列表，UE 将其非线性的算力 trade-off 离散化为若干组向量配置；基站侧则通过 `CombIndicator-r17` 进行动态裁决。这种机制从宏观信令上，保障了异构调度体系下 L1 软硬件资源的绝对安全边界。**
 
+## 📖 协议原文拆解 (四十一)：冰火交锋！极速与佛系的“混搭套餐 3.0” (R16+R17 混配)
+
+> **协议原文**
+> If a UE indicates in UE-NR-Capability a carrier aggregation capability larger than one downlink cell with monitoringCapabilityConfig = r16monitoringcapability or larger than one downlink cell with monitoringCapabilityConfig = r17monitoringcapability, the UE includes in UE-NR-Capability an indication for a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs the UE can monitor for downlink cells with monitoringCapabilityConfig = r16monitoringcapability or for downlink cells with monitoringCapabilityConfig = r17monitoringcapability when the UE is configured for carrier aggregation operation over more than two downlink cells with at least one downlink cell with monitoringCapabilityConfig = r16monitoringcapability and with at least one downlink cell with monitoringCapabilityConfig = r17monitoringcapability. When a UE is not configured for NR-DC operation, the UE determines a capability to monitor a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs per span or per group of $X_s$ slots that corresponds to $N_{cells,r16/r17}^{cap-r17}$ downlink cells or to $N_{cells,r17/r16}^{cap-r17}$ downlink cells, respectively, where
+> - $N_{cells,r16/r17}^{cap-r17}$ is the number of configured downlink cells if the UE does not provide pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList2
+> - otherwise,
+> - if the UE reports only one combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA2) in pdcch-BlindDetectionMixedList2, $N_{cells,r16/r17}^{cap-r17}$ is the value of pdcch-BlindDetectionCA1
+> - else, $N_{cells,r16/r17}^{cap-r17}$ is the value of pdcch-BlindDetectionCA2 from a combination of (pdcch-BlindDetectionCA2, pdcch-BlindDetectionCA3) that is provided by pdcch-BlindDetectionCA-CombIndicator-r17
+> and
+> - $N_{cells,r17/r16}^{cap-r17}$ is the number of configured downlink cells if the UE does not provide pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList2
+> - otherwise,
+> - if the UE reports only one combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA2) in pdcch-BlindDetectionMixedList2, $N_{cells,r17/r16}^{cap-r17}$ is the value of pdcch-BlindDetectionCA2
+> - else, $N_{cells,r17/r16}^{cap-r17}$ is the value of pdcch-BlindDetectionCA3 from a combination of (pdcch-BlindDetectionCA2, pdcch-BlindDetectionCA3) that is provided by pdcch-BlindDetectionCA-CombIndicator-r17
+
+### 📚 增量术语表
+* **Mixed CA (R16 and R17)**：极速与极高频混合载波聚合。**一句话解释**：这是对手机芯片压榨最残忍的一种业务组合。一边是要求几微秒内必须出结果的极速业务（R16 per span），另一边是要求连续横跨好几个时隙大周期的极高频业务（R17 per group）。
+* **pdcch-BlindDetectionMixedList2**：混合算力套餐列表第 2 版。**一句话解释**：专门给 R16+R17 这种极端混搭模式定制的一张“菜单”（请回忆上一段的 `MixedList1` 是给 R15+R17 用的，3GPP 再次进行了绝对的命名空间隔离）。
+
+### 🚪 第一关：左手“颠勺爆炒”，右手“文火慢炖”
+阅读到这里，我们已经彻底打通了 5G 盲检调度在多频段聚合时的“任督二脉”。
+这是混搭场景的最后一块拼图：**R16 + R17 同时运行**。
+
+* **R16 极速模式** 对芯片的要求是：**瞬间爆发力极强**，要求底层极化译码器（Polar Decoder）极速运转。
+* **R17 佛系模式** 对芯片的要求是：**缓存肚子极大**，因为要跨越好几天（好几个时隙）算总账，要求 SRAM 内存能囤积海量的射频采样点。
+
+这两种能力在芯片底层抢占的是完全不同维度的资源。如果手机同时连着这两种频段（CA > 2 cells 且触发混搭），它必须向基站提交一份全新的专属能力评估菜单——`MixedList2`。
+
+### 🎯 第二关：连代码格式都复刻的“查表逻辑”
+协议关于怎么选套餐、怎么定天花板的决策树，和前面的 R15+R16、R15+R17 简直是一比一复制粘贴的：
+1. **没交菜单 (缺省)**：直接按分配的物理频段数锁死（极其保守，甚至去掉了 $R$ 倍的折算，说明在这个极端模式下协议不敢有任何乐观估计）。
+2. **菜单只有单选**：直接取元组里的 CA1 和 CA2 赋值给两边。
+3. **菜单有多选 (点菜模式)**：基站下发 `CombIndicator-r17`。手机收到后，从列表中抽出对应的套餐，将套餐里的两项配额分别锁死为主/辅两种业务的物理算力天花板。
+
+*(注：再次注意 3GPP 协议定稿时对 CA1/CA2/CA3 下标编号产生的轻微笔误混用，但这在 ASN.1 字典解析时并不影响逻辑：点菜器点中哪个元组，就机械地提取元组的第一项给 R16，第二项给 R17。)*
+
+### 🔄 混搭模式 3.0 (R16 + R17) 最终判定树
+```text
+【最极端并发：R16 (按微秒极速结) + R17 (按周佛系结)】
+
+手机提交 极端混合能力清单 (pdcch-BlindDetectionMixedList2)
+        │
+        ├─► 有多个妥协套餐可供选择！
+        │    (比如: 套餐A 极速爆炒多一点；套餐B 慢炖多一点)
+        │
+        ▼
+基站根据当前全网负载，下发点菜器 (CombIndicator-r17)
+        │
+        ├─► 提取出该套餐的前置变量 ──► 设定为 N_{cells,r16/r17}^{cap-r17} (R16天花板)
+        │
+        └─► 提取出该套餐的后置变量 ──► 设定为 N_{cells,r17/r16}^{cap-r17} (R17天花板)
+```
+
+### 💡 章节硬核总结
+
+**本段协议完成了 5G 物理层对于 PDCCH 盲检机制在不同时域粒度特征组合（Features Combinations）下的全局穷举（Global Enumeration）。通过 `MixedList2` 的引入，3GPP 成功对 R16 (Sub-slot URLLC) 与 R17 (Multi-slot RedCap/FR2) 这一对硬件压榨特征截然相反的技术进行了 L1 资源隔离规划。由于极低延迟（需极速译码）与大尺度跨度（需极深缓冲）在 ASIC/DSP 硬件层面极难达到双峰值，协议允许终端通过元组向量上报其 Pareto 最优边界。并且，在 Failsafe 缺省路由中去除了之前 eMBB 混配中允许的 $R \cdot N$ 线性膨胀系数，强行退化至物理小区数量原值，体现了底层架构在面对未知极寒工况时“安全至上（Safety-Critical）”的设计哲学。至此，5G 下行控制信道的容量约束框架已经彻底闭环。**
+
+## 📖 协议原文拆解 (四十二)：终极三合一大缝合！常规、极速与养生的“全家桶套餐”
+
+> **协议原文**
+> If a UE indicates in UE-NR-Capability a carrier aggregation capability larger than one downlink cell with monitoringCapabilityConfig = r15monitoringcapability, or larger than one downlink cell with monitoringCapabilityConfig = r16monitoringcapability, or larger than one downlink cell with monitoringCapabilityConfig = r17monitoringcapability, the UE includes in UE-NR-Capability an indication for a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs the UE can monitor for downlink cells with monitoringCapabilityConfig = r15monitoringcapability, or for downlink cells with monitoringCapabilityConfig = r16monitoringcapability, or for downlink cells with monitoringCapabilityConfig = r17monitoringcapability when the UE is configured for carrier aggregation operation over more than three downlink cells with at least one downlink cell with monitoringCapabilityConfig = r15monitoringcapability, at least one downlink cell with monitoringCapabilityConfig = r16monitoringcapability and at least one downlink cell with monitoringCapabilityConfig = r17monitoringcapability. When a UE is not configured for NR-DC operation, the UE determines a capability to monitor a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs per slot or per span or per group of 𝑋𝑠 slots that corresponds to 𝑁𝑐𝑒𝑙𝑙𝑠,𝑟15/{𝑟16,𝑟17}𝑐𝑎𝑝−𝑟17 downlink cells or to 𝑁𝑐𝑒𝑙𝑙𝑠,𝑟16/{𝑟15,𝑟17}𝑐𝑎𝑝−𝑟17 downlink cells or to 𝑁𝑐𝑒𝑙𝑙𝑠,𝑟17/{𝑟15,𝑟16}𝑐𝑎𝑝−𝑟17 downlink cells, respectively, where
+>  - 𝑁𝑐𝑒𝑙𝑙𝑠,𝑟15/{𝑟16,𝑟17}𝑐𝑎𝑝−𝑟17 is the number of configured downlink cells if the UE does not provide pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList3
+>  - otherwise,
+>    - if the UE reports only one combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA2, pdcch-BlindDetectionCA3) in pdcch-BlindDetectionMixedList3, 𝑁𝑐𝑒𝑙𝑙𝑠,𝑟15/{𝑟16,𝑟17}𝑐𝑎𝑝−𝑟17 is the value of pdcch-BlindDetectionCA1
+>    - else, 𝑁𝑐𝑒𝑙𝑙𝑠,𝑟15/{𝑟16,𝑟17}𝑐𝑎𝑝−𝑟17 is the value of pdcch-BlindDetectionCA1 from a combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA2, pdcch-BlindDetectionCA3) that is provided by pdcch-BlindDetectionCA-CombIndicator-r17
+>  - 𝑁𝑐𝑒𝑙𝑙𝑠,𝑟16/{𝑟15,𝑟17}𝑐𝑎𝑝−𝑟17 is the number of configured downlink cells if the UE does not provide pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList3
+>  - otherwise,
+>    - if the UE reports only one combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA2, pdcch-BlindDetectionCA3) in pdcch-BlindDetectionMixedList3, 𝑁𝑐𝑒𝑙𝑙𝑠,𝑟16/{𝑟15,𝑟17}𝑐𝑎𝑝−𝑟17 is the value of pdcch-BlindDetectionCA2
+>    - else, 𝑁𝑐𝑒𝑙𝑙𝑠,𝑟16/{𝑟15,𝑟17}𝑐𝑎𝑝−𝑟17 is the value of pdcch-BlindDetectionCA2 from a combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA2, pdcch-BlindDetectionCA3) that is provided by pdcch-BlindDetectionCA-CombIndicator-r17
+>  and
+>  - 𝑁𝑐𝑒𝑙𝑙𝑠,𝑟17/{𝑟15,𝑟16}𝑐𝑎𝑝−𝑟17 is the number of configured downlink cells if the UE does not provide pdcch-BlindDetectionCA3 in pdcch-BlindDetectionMixedList3
+>  - otherwise,
+>    - if the UE reports only one combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA2, pdcch-BlindDetectionCA3) in pdcch-BlindDetectionMixedList3, 𝑁𝑐𝑒𝑙𝑙𝑠,𝑟17/{𝑟15,𝑟16}𝑐𝑎𝑝−𝑟17 is the value of pdcch-BlindDetectionCA3
+>    - else, 𝑁𝑐𝑒𝑙𝑙𝑠,𝑟17/{𝑟15,𝑟16}𝑐𝑎𝑝−𝑟17 is the value of pdcch-BlindDetectionCA3 from a combination of (pdcch-BlindDetectionCA1, pdcch-BlindDetectionCA2, pdcch-BlindDetectionCA3) that is provided by pdcch-BlindDetectionCA-CombIndicator-r17
+
+### 📚 增量术语表
+* **Triple Mixed CA (R15 + R16 + R17)**：终极大混搭载波聚合。**一句话解释**：这是 5G 手机性能面临的最高考验！手机同时挂着三类频段：有的频段要求“按天结”（R15 常规），有的频段要求“按微秒结”（R16 极速），还有的频段要求“按周结”（R17 养生）。三线操作，同时并行！
+* **pdcch-BlindDetectionMixedList3**：混合算力套餐列表第 3 版 (终极版)。**一句话解释**：专门给 R15+R16+R17 三合一模式定制的菜单。前面的 List1 是两项组合，List2 也是两项组合，这个 List3 直接进化成了 **三维向量组合**。
+* **(CA1, CA2, CA3)**：三维算力套餐组合。**一句话解释**：手机向基站申报的算力配比。CA1 留给常规，CA2 留给极速，CA3 留给养生。
+
+### 🚪 第一关：逼出手机的极限潜能 (三线并行的门槛)
+前三段协议（39、40、41段）像是分别在教你怎么玩“红+蓝”、“红+绿”、“蓝+绿”的组合。
+这段协议直接迎来了最终 Boss 战：“**红+蓝+绿 三色全开**”。
+
+只要手机吹牛说它能在以上任何一种模式下支持聚合 1 个以上的小区，并且现在基站真的给它配置了 **大于 2 个小区（即至少 3 个），且这三个小区刚好把 R15、R16、R17 这三种调度模式全占齐了**！
+此时，手机必须交出终极防爆说明书——也就是基于 `MixedList3` 的三维能力套餐列表。
+
+### 🎯 第二关：万变不离其宗的“套餐提取逻辑”
+虽然文字长得像是在念咒语，参数角标长得像乱码（比如 `$N_{cells,r15/\{r16,r17\}}^{cap-r17}$`，意思是在混搭了 R16和R17 的情况下，专门为 R15 分配的天花板），但判定逻辑**完全没有任何创新，依旧是祖传三板斧**：
+
+1. **缺省惩罚 (不交菜单)**：直接看物理上分配了几个这种类型的小区，有几个算几个。没有任何多余的折算，用最死板、最不吃性能的底线运行。
+2. **唯一选项 (交了单一套餐)**：直接把三维向量 `(CA1, CA2, CA3)` 原封不动地分别赋值给 R15、R16、R17 这三套底层译码流水线，作为它们各自死守的算力上限。
+3. **多套餐点菜 (交了组合菜单)**：基站下发终极点菜器 `CombIndicator-r17`。手机顺着编号找到那个被点中的三维向量套餐。
+   * 把套餐里的 **第 1 项 (CA1)** 抽出来 $\rightarrow$ 锁死为 R15 的天花板。
+   * 把套餐里的 **第 2 项 (CA2)** 抽出来 $\rightarrow$ 锁死为 R16 的天花板。
+   * 把套餐里的 **第 3 项 (CA3)** 抽出来 $\rightarrow$ 锁死为 R17 的天花板。
+
+**生活类比**：
+你在经营一家超级外卖驿站（终端基带）。
+业务 1：普通的日结外卖（R15）。
+业务 2：10 分钟必达的加急药单（R16）。
+业务 3：一周内送达的大件家电（R17）。
+这三种业务需要的交通工具（硬件资源）完全不同。你给平台（基站）提交了一套《三栖混合作业运力分配方案 (MixedList3)》。
+平台今天看大件多，下令激活“方案C”。你立马翻出方案C的运力表，把你的员工严格按表上的数字切分成三拨人，各自守着各自的最高接单上限，雷池半步不可越。
+
+### 🔄 终极三合一算力分发架构图
+```text
+【PDCCH 盲检能力三维度并发分配机制 (R15 + R16 + R17)】
+
+  基站统筹全局，下发点菜指令 [CombIndicator-r17] 
+               │
+               ▼
+  手机在 MixedList3 菜单中精准定位到那一组三维配额向量：(CA1, CA2, CA3)
+               │
+      ┌────────┼────────┐
+      ▼        ▼        ▼
+ [分配给 R15] [分配给 R16] [分配给 R17]
+  (按天结)   (按微秒结)   (按周结)
+   │        │        │
+ 🔒限额CA1  🔒限额CA2  🔒限额CA3
+ (三套相对独立的底层状态机，拿着各自的天花板去应对基站发来的混合 DCI 洪流)
+```
+
+### 💡 章节硬核总结
+
+**本段协议是 5G 下行控制信令盲检算力模型（PDCCH Blind Decoding Capability Model）走向大一统的最终乐章。它构建了一个覆盖 eMBB(R15)、URLLC(R16) 和 RedCap/FR2(R17) 的全矩阵三维配置空间。在底层硬件架构上，这意味着基带芯片不仅要支持时域颗粒度从微秒到几十毫秒的跨度，还要能在不同的调度切片之间进行毫秒级的上下文切换（Context Switching）与内存隔离。3GPP 协议通过极其严密的数学下标定义（如 `$N_{cells,r15/\{r16,r17\}}^{cap-r17}$`）和三维元组（3-tuple `CA1,CA2,CA3`）的硬编码寻址路由，把这种对硬件近乎变态的并发要求，优雅地收敛成了一个查表操作（Look-up Table）。这种参数字典树（ASN.1 RRC Information Elements）的设计，确保了基站和终端在任何疯狂的组合调度下，其算力账本都绝对平衡、不可击穿。**
+
+## 📖 协议原文拆解 (四十三)：双连接 + 冰火两重天！终极切糕大法 (NR-DC下的 R15+R16 混配)
+
+> **协议原文**
+> When a UE is configured for NR-DC operation and is provided monitoringCapabilityConfig = r15monitoringcapability for at least one downlink cell and monitoringCapabilityConfig = r16monitoringcapability for at least one downlink cell where the UE monitors PDCCH, the UE determines a capability to monitor a maximum number of PDCCH candidates and a maximum number of non-overlapped CCEs that corresponds to
+> - $N_{cells,r15}^{cap-r16} = N_{cells,r15}^{MCG}$ downlink cells for the MCG where $N_{cells,r15}^{MCG}$ is provided by pdcch-BlindDetection3 for the MCG,
+> - $N_{cells,r15}^{cap-r16} = N_{cells,r15}^{SCG}$ downlink cells for the SCG where $N_{cells,r15}^{SCG}$ is provided by pdcch-BlindDetection3 for the SCG, and
+> - $N_{cells,r16}^{cap-r16} = N_{cells,r16}^{MCG}$ downlink cells for the MCG where $N_{cells,r16}^{MCG}$ is provided by pdcch-BlindDetection2 for the MCG,
+> - $N_{cells,r16}^{cap-r16} = N_{cells,r16}^{SCG}$ downlink cells for the SCG where $N_{cells,r16}^{SCG}$ is provided by pdcch-BlindDetection2 for the SCG
+
+### 📚 增量术语表
+* **NR-DC + Mixed CA**：双连接叠加混合载波。**一句话解释**：手机连着两个基站（主辅），同时这两个基站又各自或交叉地给你派发普通业务（R15）和极速业务（R16）。这是拓扑结构最复杂的通信场景。
+* **pdcch-BlindDetection3**：第三代 PDCCH 盲检能力分配值。**一句话解释**：终于破案了！在第（三十五）段中消失的那个神秘的“第 3 号账本”出现了。它是专门用来在“混搭模式”下，用来给双连接的主辅基站切分 **R15 (常规业务)** 算力配额的。
+
+### 🚪 第一关：找回失落的“3号账本”
+之前的协议里，我们见过了 1代、2代、4代账本。
+* 1代：全网只有 R15 时，切分主辅基站的常规算力。
+* 2代：全网只有 R16 时，切分主辅基站的极速算力。
+* 4代：全网只有 R17 时，切分主辅基站的养生算力。
+
+但现在，全网既有 R15 又有 R16（混搭模式）。
+极速部分的切分，协议继续沿用了专款专用的 **2代账本 (`pdcch-BlindDetection2`)**。
+常规部分的切分怎么办？能用 1代账本 吗？**不行！**
+因为在混搭模式下，常规算力已经被极速算力抢走了一部分，它的大小和纯 R15 时截然不同。为了防止参数污染，3GPP 发明了这本专门在混搭模式下给 R15 用的 **3代账本 (`pdcch-BlindDetection3`)**。
+
+### 🎯 第二关：在两个维度上同时“切蛋糕”
+在这个极其复杂的场景下，手机收到的不是一个天花板数值，而是**四个绝对物理天花板的数值**。手机基带必须在内部划出四个严格隔离的处理特区：
+
+1. **主基站 (MCG) 的常规业务区**：从 3代账本 领预算，干 R15 的活。
+2. **辅基站 (SCG) 的常规业务区**：从 3代账本 领预算，干 R15 的活。
+3. **主基站 (MCG) 的极速业务区**：从 2代账本 领预算，干 R16 的活。
+4. **辅基站 (SCG) 的极速业务区**：从 2代账本 领预算，干 R16 的活。
+
+**生活类比**：
+你在两家外卖平台接单（主平台MCG、辅平台SCG），同时这两个平台都有“普通单(R15)”和“加急单(R16)”。
+公司为了防止你猝死，给你下发了四个不同的接单上限配额本：
+* “3号本子”规定了你在两个平台分别最多能接几单普通件。
+* “2号本子”规定了你在两个平台分别最多能接几单加急件。
+你每天干活，就看着这四个配额，哪个配额满了，就拒接对应平台对应类型的单子。
+
+### 🔄 四象限物理算力切割矩阵
+```text
+【NR-DC 双连接】 + 【R15常规/R16极速混搭】
+
+            [主基站 MCG 资源池]            [辅基站 SCG 资源池]
+         ┌─────────────────────┐      ┌─────────────────────┐
+[R15 业务]│ 3代账本 (BlindDet-3)│      │ 3代账本 (BlindDet-3)│
+         ├─────────────────────┤      ├─────────────────────┤
+[R16 业务]│ 2代账本 (BlindDet-2)│      │ 2代账本 (BlindDet-2)│
+         └─────────────────────┘      └─────────────────────┘
+
+*(基站的 RRC 层将通过信令分别向这四个物理格子填入上限数值，彻底锁死终端处理的边界)*
+```
+
+### 💡 章节硬核总结
+
+**本段协议是 3GPP 命名空间隔离设计（Namespace Isolation Design）的极致体现。它在逻辑最繁杂的网形（Multi-TRP NR-DC）与最错乱的时域（Mixed R15/R16 Numerology）叠加态下，构建了一个清晰的 $2 \times 2$ 算力正交分配矩阵。这里最大的亮点是填补了协议字典中缺失的 `pdcch-BlindDetection3`。为什么在混合模式下需要一个新的 R15 参数？因为在独立的 eMBB 模式中，R15 的算力天花板是无竞争的（Uncontested）；而在混合模式下，R15 的算力配额已经被 R16 动态压缩过了。使用专门的 `BlindDetection3` 而非复用 `BlindDetection1`，从 ASN.1 信令结构上彻底避免了终端在 RRC 重配置过程中状态机回滚时可能发生的新旧参数交叉感染。这赋予了 5G 系统无与伦比的调度稳定性。**
+
+## 📖 协议原文拆解 (四十四)：混搭模式的最后通牒——常规与极速的“双重红线”
+
+> **协议原文**
+> When the UE is configured for carrier aggregation operation over more than two downlink cells with at least one downlink cell with monitoringCapabilityConfig = r15monitoringcapability, at least one downlink cell with monitoringCapabilityConfig = r16monitoringcapability, and no downlink cell has SCS configuration $\mu \in \{5,6\}$, or for a cell group when the UE is configured for NR-DC operation, the UE does not expect to
+> - monitor per slot a number of PDCCH candidates or a number of non-overlapped CCEs that is larger than the maximum number as derived from the corresponding value of $N_{cells,r15}^{cap-r16}$, and
+> - monitor per span a number of PDCCH candidates or a number of non-overlapped CCEs that is larger than the maximum number as derived from the corresponding value of $N_{cells,r16}^{cap-r16}$
+
+### 📚 增量术语表
+* **no downlink cell has SCS configuration $\mu \in \{5,6\}$**：不包含极高频段。**一句话解释**：协议在这里专门加了一个限定条件，把 480kHz 和 960kHz 的太赫兹/极高频毫米波排除在外。因为那些频段要用 R17 的“按周结”特殊规则。这里我们只讨论纯粹的 R15(常规) 和 R16(极速) 混搭。
+* **does not expect**：不预期。**一句话解释**：物理层给基站排班系统画的“高压电网”，越线即罢工。
+
+### 🚪 第一关：收网！混合模式下的双线防御
+就像我们之前在单独的 R15 模式、单独的 R16 模式下看到的最后通牒一样，现在轮到 **R15+R16 混搭模式** 结账了。
+既然在前面（三十九段和四十三段）基站已经把两种业务的天花板（$N_{cells,r15}^{cap-r16}$ 和 $N_{cells,r16}^{cap-r16}$）算得清清楚楚了，那么在实战执行时，手机就会同时拉起**两道防御红线**。
+
+### 🎯 第二关：独立运转的“两套违章抓拍系统”
+手机底层会同时运行两个算力监控探头，分别盯着两种业务：
+1. **盯住“按天结”的常规业务 (Per Slot)**：
+   探头在每一天（一个 Slot）结束时算总账。如果你基站今天派给我的常规解密任务，超过了 $N_{cells,r15}$ 换算出来的天花板，手机绝不惯着（`does not expect`），直接罢工拒收多余的常规纸条。
+2. **盯住“按瞬时结”的极速业务 (Per Span)**：
+   探头在每一个极短的微秒瞬间（一个 Span）里算总账。如果你基站在这个瞬间塞给我的加急任务，超过了 $N_{cells,r16}$ 换算出来的天花板，手机同样瞬间罢工（`does not expect`），直接扔掉超载的极速纸条。
+
+**生活类比**：
+你是一个外卖骑手，同时接常规单（R15）和闪送单（R16）。
+平台给你定下的物理极限是：【每天最多送 50 个常规单】，且【每小时最多送 5 个闪送单】。
+* 场景A：平台今天给你派了 4 个闪送单（没超），但一天下来给你派了 60 个常规单（超了）。对不起，多出的 10 个常规单我直接拒接！
+* 场景B：平台今天给你派了 30 个常规单（没超），但在中午12点那一个小时里，疯狂给你派了 8 个闪送单（超了）。对不起，多出的 3 个闪送单我当场拒接！
+两套规矩，两套账本，互相独立，任何一个越界都会触发底层的保护机制。
+
+### 🔄 混搭模式下的双路过载监控矩阵
+```text
+【手机处于 R15(常规) + R16(极速) 混合并行盲检状态】
+
+            [基站下发的实际 DCI 排班洪流]
+                       │
+       ┌───────────────┴───────────────┐
+       ▼                               ▼
+[监控探头 1: 时隙级 Per Slot]     [监控探头 2: 亚时隙级 Per Span]
+  (统计所有 R15 纸条和面积)         (统计所有 R16 纸条和面积)
+       │                               │
+       ├─► 超过 N_r15 算出的上限？      ├─► 超过 N_r16 算出的上限？
+       │                               │
+   (是) 🚨 触发罢工！              (是) 🚨 触发罢工！
+   (否) ✅ 正常解密                (否) ✅ 正常解密
+
+*(两个探头并行工作，确保底层硬件的长时间功耗与瞬时峰值功耗均处于安全区)*
+```
+
+### 💡 章节硬核总结
+
+**本段协议确立了 5G 物理层在 Mixed Numerology/Capability 场景下的“正交越限保护（Orthogonal Overbooking Protection）”法则。在去除了 FR2-2 极高频（$\mu \in \{5,6\}$）的干扰后，协议明确指示了在 R15 与 R16 混合调度时，UE 的物理层防线也是双轨并行的。`does not expect` 原语被同时挂载到了宏观的 per-slot 累加器和微观的 per-span 累加器上。这种设计说明了基带内部的资源竞争并非简单的“一锅粥”，而是长时序译码池与极低延迟译码池的物理/逻辑隔离。调度器（Scheduler）必须同时求解两个维度的约束方程，任何一个维度的超载都将被底层状态机无情拦截，从而在根本上保障了复杂异构载波聚合环境下的系统调度收敛性。**
+
+## 📖 协议原文拆解 (四十五)：冰火双规的再延续——常规与养生的“双重红线”
+
+> **协议原文**
+> When the UE is configured for carrier aggregation operation over more than two downlink cells with at least one downlink cell with monitoringCapabilityConfig = r15monitoringcapability, at least one downlink cell with monitoringCapabilityConfig = r17monitoringcapability, and no downlink cell with monitoringCapabilityConfig = r16monitoringcapability, the UE does not expect to
+> - monitor per slot a number of PDCCH candidates or a number of non-overlapped CCEs that is larger than the maximum number as derived from the corresponding value of $N_{cells,r15/r17}^{cap-r17}$, and
+> - monitor per group of $X_s$ slots a number of PDCCH candidates or a number of non-overlapped CCEs that is larger than the maximum number as derived from the corresponding value of $N_{cells,r17/r15}$
+
+*(注：协议最后缺了上标，按照全文逻辑一致性，此处应为 `$N_{cells,r17/r15}^{cap-r17}$`)*
+
+### 📚 增量术语表
+* **no downlink cell with monitoringCapabilityConfig = r16monitoringcapability**：不包含极速频段。**一句话解释**：排除了要求“按微秒结”的 R16 URLLC 业务。这里只探讨“按天结”（R15）和“按周结”（R17）两类长周期业务的混搭。
+
+### 🚪 第一关：换汤不换药的“过载保护法”
+这完全是上一段（四十四段）的镜像条款。
+上一段处理的是 **R15 (常规) + R16 (极速)**。
+这一段处理的是 **R15 (常规) + R17 (佛系/极高频)**。
+
+既然在第（四十）段中，我们已经教会了基站怎么在这两种模式之间通过“菜单点菜（MixedList1）”切分出了各自的天花板配额：
+* 常规天花板：$N_{cells,r15/r17}^{cap-r17}$
+* 养生天花板：$N_{cells,r17/r15}^{cap-r17}$
+
+那么在实际跑业务时，依然是启动**两套独立的违章抓拍系统**，严格执法！
+
+### 🎯 第二关：双重账期的严格清算 (Per Slot vs Per Group)
+手机底层的两个探头，各自按照不同的“查账周期”在运转：
+1. **日结探头 (Per Slot)**：盯着 R15 业务。每天日落时（Slot 结束）结算一次，如果你这一天派的 R15 纸条数或总面积超过了算好的常规天花板，手机直接罢工拒收多余部分（`does not expect`）。
+2. **周结探头 (Per group of $X_s$ slots)**：盯着 R17 业务。这可能需要好几天（$X_s$ 个时隙）才结算一次。在这一整个大周期结束时，如果你这段时间累积塞给我的 R17 纸条总数超过了算好的养生天花板，手机同样行使否决权，罢工拒收（`does not expect`）。
+
+**生活类比**：
+你是外包公司（手机），接了甲方（基站）的两个项目。
+项目A（R15）签的是**日薪合同**，每天工作上限 8 小时。
+项目B（R17）签的是**包工合同**，每 7 天工作上限总计 20 小时。
+* 只要甲方敢让你今天干 10 小时项目A，你立刻罢工（日结账单越线）。
+* 只要甲方这 7 天内累计让你干了 25 小时项目B，你同样在满 20 小时的那一刻起直接罢工（包工账单越线）。
+两份合同，互不干涉，红线分明。
+
+### 🔄 R15 + R17 混搭模式双防线拓扑
+```text
+【手机处于 R15(常规) + R17(养生/极高频) 混合并行盲检状态】
+
+            [基站下发的实际 DCI 排班洪流]
+                       │
+       ┌───────────────┴───────────────┐
+       ▼                               ▼
+[探头 1: 时隙级 Per Slot]         [探头 2: 宏观周期级 Per Group]
+  (统计单日 R15 任务总量)            (统计整个Xs周期内 R17 任务总量)
+       │                               │
+       ├─► 超过 N_r15 上限？             ├─► 超过 N_r17 上限？
+       │                               │
+   (是) 🚨 触发日结罢工！            (是) 🚨 触发周期罢工！
+   (否) ✅ 正常解密                 (否) ✅ 正常解密
+
+*(防呆设计确保了常规内存池与深层大周期缓存池各自独立安全)*
+```
+
+### 💡 章节硬核总结
+
+**本段协议完成了混合载波聚合中“异构时域积分器（Heterogeneous Time-domain Integrators）”的合法性断言。当 UE 面临 eMBB（per-slot）与 FR2-2/RedCap（per group of slots）并发的调度时，底层的物理现象是缓存生命周期的巨大割裂：R15 的信道估计缓存每日刷新，而 R17 的缓存可能需要维持数日。因此，协议在此明确了双重 `UE does not expect` 检查准则。它将宏观过载判定逻辑解耦为两个拥有不同积分时间窗（Integration Window）的状态机。这种时域完全正交的防御红线，使得基站在对全网资源进行联合调度时，必须同时满足两个约束方程，从根本上防止了长周期任务挤占短周期内存，或短周期高发任务打断长周期累积过程的底层硬件灾难。**
+
+## 📖 协议原文拆解 (四十六)：极速与养生的终极防线——冰火两重天的“双重红线”
+
+> **协议原文**
+> When the UE is configured for carrier aggregation operation over more than two downlink cells with at least one downlink cell with monitoringCapabilityConfig = r16monitoringcapability, at least one downlink cell with monitoringCapabilityConfig = r17monitoringcapability, and no downlink cell with monitoringCapabilityConfig = r15monitoringcapability, the UE does not expect to
+> - monitor per span a number of PDCCH candidates or a number of non-overlapped CCEs that is larger than the maximum number as derived from the corresponding value of $N_{cells,r16/r17}^{cap-r17}$, and
+> - monitor per group of $X_s$ slots a number of PDCCH candidates or a number of non-overlapped CCEs that is larger than the maximum number as derived from the corresponding value of $N_{cells,r17/r16}^{cap-r17}$
+
+### 📚 增量术语表
+* **no downlink cell with monitoringCapabilityConfig = r15monitoringcapability**：不包含常规频段。**一句话解释**：排除了要求“按天结”的普通 R15 业务。本段只讨论最变态的组合：**“按微秒结”的极速 R16** 加上 **“按周结”的长周期 R17**。
+
+### 🚪 第一关：补齐混搭防御矩阵的最后一块拼图
+经过（四十四段）和（四十五段）的洗礼，这段协议的结构已经对我们毫无秘密可言了。
+协议在不厌其烦地穷举所有可能的混搭场景，并为每一种场景下达**违规拦截令（`does not expect`）**。
+
+这一段处理的是手机底层硬件**撕裂感最强**的一种调度态：
+* 一部分电路在疯狂运转，处理那些可能几微秒后就要出结果的 URLLC 极速任务（R16）。
+* 另一部分电路在慢吞吞地积攒数据，处理好几天才算一笔总账的极高频/低功耗任务（R17）。
+
+### 🎯 第二关：微观瞬时与宏观长周期的“独立执法”
+既然在第（四十一）段，手机和基站已经通过点菜菜单（`MixedList2`）商量好了这两项极端业务各自的算力天花板配额，那么实战执法就必须无条件生效：
+
+1. **瞬时抓拍探头 (Per Span)**：死死盯住 R16 业务。只要在这几十微秒的一个极短瞬间，基站塞进来的急件数量或面积超过了换算出来的极速天花板，手机瞬间判定**超载罢工**！
+2. **长效审计探头 (Per group of $X_s$ slots)**：默默记录 R17 业务。在这个长达几天的周期快结束时一算账，如果累计的慢性件总数或总面积超过了换算出来的养生天花板，手机同样判定**超载罢工**！
+
+**生活类比**：
+你在核电站控制室上班。
+左手控制面板是**核反应堆紧急急停按钮（R16极速）**，要求毫秒级反应；右手面板是**冷却水温长期监控表（R17大周期）**，要求观察几天内的走势。
+为了防止你手忙脚乱出人命，安监局（协议）立下死规矩：
+* 只要一小时内响起的急停警报超过了你申报的极限次数，你直接拒绝操作剩下的警报（瞬时超载罢工）。
+* 只要一周内累积需要填写的温度报表超过了你申报的最高本数，你在超额那一刻直接拒写（长周期超载罢工）。
+
+### 🔄 R16 + R17 冰火两重天防过载拓扑
+```text
+【手机处于 R16(微秒极速) + R17(跨天长线) 混合并行盲检状态】
+
+            [基站下发的实际 DCI 极端排班洪流]
+                       │
+       ┌───────────────┴───────────────┐
+       ▼                               ▼
+[探头 A: 亚时隙级 Per Span]       [探头 B: 宏观周期级 Per Group]
+  (统计微秒瞬间的 R16 任务峰值)      (统计整个Xs周期内 R17 任务积分)
+       │                               │
+       ├─► 超过 N_r16 上限？             ├─► 超过 N_r17 上限？
+       │                               │
+   (是) 🚨 触发瞬时罢工！            (是) 🚨 触发周期罢工！
+   (否) ✅ 正常极速解密              (否) ✅ 正常长线解密
+
+*(两个极端的时域判定窗完全解耦，确保快通道不被慢信令阻塞，慢通道不被快信令冲垮)*
+```
+
+### 💡 章节硬核总结
+
+**本段协议完成了 5G 物理层调度模型中最为极端的“两极分化”时间窗组合（Two-extremes Time-window Combination）的合法性硬性兜底。将要求极低延迟（Sub-slot）的 URLLC 盲检与要求长积分周期（Multi-slot）的 FR2-2/RedCap 盲检聚合在同一个 UE 实体上，是基带硬件架构设计的噩梦。3GPP 协议通过明确双轨 `does not expect` 原语，在法理上豁免了 UE 去处理调度器配置越界的责任。它强制网络侧（gNB Scheduler）必须在下发 DCI 之前，在其内部通过两个相互正交的累加器（分别针对 Span 和 Group of slots）进行前向算力预算验证（Forward Budget Verification）。这种将硬件防灾逻辑（Hardware Disaster-prevention）前置到通信系统高层软件（Scheduler）的协议设计，是现代复杂通信系统保障极高可用性的精髓。**
+
+## 📖 协议原文拆解 (四十七)：终局之战！“三色全开”混搭下的三重绝对防线
+
+> **协议原文**
+> When the UE is configured for carrier aggregation operation over more than three downlink cells with at least one downlink cell with monitoringCapabilityConfig = r15monitoringcapability, at least one downlink cell with monitoringCapabilityConfig = r16monitoringcapability, and at least one downlink cell with monitoringCapabilityConfig = r17monitoringcapability, the UE does not expect to
+> - monitor per slot a number of PDCCH candidates or a number of non-overlapped CCEs that is larger than the maximum number as derived from the corresponding value of $N_{cells,r15/\{r16,r17\}}^{cap-r17}$, and
+> - monitor per span a number of PDCCH candidates or a number of non-overlapped CCEs that is larger than the maximum number as derived from the corresponding value of $N_{cells,r16/\{r15,r17\}}^{cap-r17}$, and
+> - monitor per group of $X_s$ slots a number of PDCCH candidates or a number of non-overlapped CCEs that is larger than the maximum number as derived from the corresponding value of $N_{cells,r17/\{r15,r16\}}^{cap-r17}$
+
+### 📚 增量术语表
+* **Triple Mixed CA (R15+R16+R17)**：终极大混搭载波聚合。**一句话解释**：手机同时承载着“按天结”的常规频段、“按瞬时结”的极速频段、以及“按周结”的极高频养生频段。5G 调度的地狱难度。
+
+### 🚪 第一关：漫长算力切分大戏的“全剧终”
+恭喜您！我们终于读到了 3GPP 协议关于多能力混搭（Mixed Capability）盲检算力分配的**最后一句话**。
+在第（四十二）段中，我们看到了手机如何向基站提交一份三维点菜菜单 `(CA1, CA2, CA3)`，由基站选定套餐后，算出这三个维度的算力天花板。
+现在，实战打响。基站的排班指令如同洪水般涌向手机。协议在这里砸下了 5G 物理层最沉重的一道三联装防爆门。
+
+### 🎯 第二关：三路探头，独立抓拍，越线即斩
+面对基站发来的海量 PDCCH 纸条，手机底层芯片会瞬间分裂出**三个绝对隔离的审查委员会**，它们各自拿着秒表和计数器，死死盯住对应业务的吞吐量：
+
+1. **常规审查委 (Per Slot 探头)**：按“天”查账。只查 R15 业务。一旦发现今天的常规纸条数超过了 $N_{cells,r15/...}$ 算出的配额 ──► **罢工拒收（does not expect）！**
+2. **极速审查委 (Per Span 探头)**：按“微秒”查账。只查 R16 业务。在这几十微秒内，只要极速纸条数量敢超过 $N_{cells,r16/...}$ 算出的配额 ──► **瞬时罢工（does not expect）！**
+3. **宏观审查委 (Per Group 探头)**：按“周”查账。只查 R17 业务。在整个 $X_s$ 周期结束时，如果累计的佛系纸条总数超过了 $N_{cells,r17/...}$ 算出的配额 ──► **全面罢工（does not expect）！**
+
+**生活类比**：
+一个超级厨房（手机基带）同时处理三类外卖：
+* **堂食快餐 (R15)**：要求每天最多出 100 份（Slot 结算）。
+* **救护车加急餐 (R16)**：要求每 2 分钟最多出 5 份（Span 结算）。
+* **大型企业团建餐 (R17)**：要求每 7 天最多出 500 份（Group 结算）。
+厨房经理（协议）立下死规矩：这三个流水线的计数器**互不借用、互不干扰**。只要任何一个流水线的点餐机器发疯，超出了刚才定好的配额，哪怕其他两条线闲着，超载的那条流水线也必须立刻拔电源（触发自保机制），拒绝再出餐！
+
+### 🔄 终极“三色全开”防御矩阵图
+```text
+【5G 终极形态：三栖并发控制信道盲检】
+
+[基站下发海量混合 DCI 调度指令] 
+            │
+  ┌─────────┼─────────┐ (三套账本、三套时钟并行运转)
+  ▼         ▼         ▼
+[探头1]   [探头2]   [探头3]
+Per Slot  Per Span  Per Group
+(看R15)   (看R16)   (看R17)
+  │         │         │
+ 🚨超标?   🚨超标?   🚨超标?
+  │         │         │
+ 拒收      拒收      拒收
+```
+
+### 💡 章节硬核总结
+
+**本段协议是 3GPP 第 10 章 PDCCH 盲检预算管理（Overbooking Management）的集大成之作与逻辑收口。它完美证明了通信标准设计中的“正交性（Orthogonality）”美学。无论系统引入多少种特性（eMBB, URLLC, RedCap），无论这三种业务在 MAC 层的调度队列如何错综复杂地交织，L1 物理层应对这种 Combinatorial Explosion（组合爆炸）的手段始终是：在数学上切分为 N 个相互正交的子空间。通过严格执行三个独立的 `UE does not expect` 逻辑断言，协议不仅在极端恶劣的多业务并发（Multi-service Concurrency）工况下保护了终端 ASIC/DSP 硬件流水线不被击穿，也为全球所有基站厂商的 Scheduler（调度器）算法划定了一条清晰不可逾越的数学约束方程组。**
+
+## 📖 协议原文拆解 (四十八)：双老板 + 双业务！混搭双连接的“双重守恒定律”
+
+> **协议原文**
+> When a UE is configured for NR-DC operation with a total of $N_{NR-DC}^{DL,cells}$ downlink cells on both the MCG and the SCG and the UE is provided monitoringCapabilityConfig = r15monitoringcapability for $N_{NR-DC,r15}^{DL,cells}$ downlink cells and monitoringCapabilityConfig = r16monitoringcapability for $N_{NR-DC,r16}^{DL,cells}$ downlink cells where the UE monitors PDCCH, the UE expects to be provided pdcch-BlindDetection3 and pdcch-BlindDetection2 for the MCG, and pdcch-BlindDetection3 and pdcch-BlindDetection2 for the SCG with values that satisfy
+> - pdcch-BlindDetection3 for the MCG + pdcch-BlindDetection3 for the SCG <= pdcch-BlindDetectionCA1, if the UE reports pdcch-BlindDetectionCA1, or
+> - pdcch-BlindDetection3 for the MCG + pdcch-BlindDetection3 for the SCG <= $N_{NR-DC,r15}^{DL,cells}$, if the UE does not report pdcch-BlindDetectionCA1
+> and
+> - pdcch-BlindDetection2 for the MCG + pdcch-BlindDetection2 for the SCG <= pdcch-BlindDetectionCA2, if the UE reports pdcch-BlindDetectionCA2, or
+> - pdcch-BlindDetection2 for the MCG + pdcch-BlindDetection2 for the SCG <= $N_{NR-DC,r16}^{DL,cells}$, if the UE does not report pdcch-BlindDetectionCA2
+
+### 📚 增量术语表
+* **$N_{NR-DC,r15}^{DL,cells}$ / $N_{NR-DC,r16}^{DL,cells}$**：分配给常规/极速业务的物理频段数。**一句话解释**：你手机虽然连了两个基站，总共 5 个频段，但其中 3 个频段在跑 R15 常规业务，2 个频段在跑 R16 极速业务。这俩数字就是物理上真实的分布情况。
+* **pdcch-BlindDetection3 (3代账本)**：专给混搭模式下 R15 业务跨基站分配算力的账本。
+* **pdcch-BlindDetection2 (2代账本)**：专给极速 R16 业务跨基站分配算力的账本。
+* **CA1 / CA2**：手机上交的《混搭能力体检表》里的两项总天花板（CA1管常规，CA2管极速）。
+
+### 🚪 第一关：两套账本，各自核对“总资产”
+我们在第（四十三）段讲过，面对“主辅双基站 (NR-DC) + 常规极速混搭 (R15+R16)”这种地狱级复杂度的场景，手机内部被划成了四个物理隔离的象限，拿到了四个数字。
+那基站在下发这四个数字时，能不能胡乱填？
+协议在这里祭出了**“双重能量守恒定律”**！并用 `UE expects`（基站敢违规，手机就拒收）来强制担保。
+
+既然业务是解耦的，那么查账也必须是**解耦双线查账**。
+
+### 🎯 第二关：常规业务 (R15) 的守恒检查线
+只看 3代账本（R15专用）：
+主基站分到的常规算力 + 辅基站分到的常规算力，**加起来绝对不能超标！**
+* **上限在哪？** 
+  * 如果手机交了混搭体检表，天花板就是体检表里的 **CA1**（常规业务总上限）。
+  * 如果手机没交，天花板就是你物理上真正挂了几个 **R15的频段（$N_{r15}$）**。
+
+### 🧩 第三关：极速业务 (R16) 的守恒检查线
+只看 2代账本（R16专用）：
+主基站分到的极速算力 + 辅基站分到的极速算力，**加起来也绝对不能超标！**
+* **上限在哪？**
+  * 如果手机交了混搭体检表，天花板就是体检表里的 **CA2**（极速业务总上限）。
+  * 如果手机没交，天花板就是你物理上真正挂了几个 **R16的频段（$N_{r16}$）**。
+
+**生活类比**：
+你在为两家公司（主、辅基站）做代工。
+你们厂有两条流水线：【普通产品线 (R15)】 和 【加急产品线 (R16)】。
+你向两家公司声明了总产能：“普通产品我两家加起来最多做 100个（CA1）；加急产品我两家加起来最多做 20个（CA2）。”
+每天早上，两家公司会分别给你派单（下发 3号和2号账本配额）。
+你拿到派单后立刻核对：
+1. 公司A的普通单 + 公司B的普通单 <= 100？ (过关！)
+2. 公司A的加急单 + 公司B的加急单 <= 20？ (过关！)
+哪怕总数没超，只要其中任意一条产品线的派单和超出了该产线的专项上限，你都会直接把订单打回重做！
+
+### 🔄 混搭双连接的“双重守恒方程组”图解
+```text
+【基带底层合规性检验方程组】
+
+[主基站]                    [辅基站]                    [手机全局物理防线]
+(BlindDet 3)       +      (BlindDet 3)       <=       [ pdcch-BlindDetectionCA1 ] 
+ (MCG-R15)                  (SCG-R15)                    (常规算力总水池)
+
+                                 AND (同时必须满足)
+
+[主基站]                    [辅基站]                    [手机全局物理防线]
+(BlindDet 2)       +      (BlindDet 2)       <=       [ pdcch-BlindDetectionCA2 ] 
+ (MCG-R16)                  (SCG-R16)                    (极速算力总水池)
+
+*(这两条方程式是硬编码在 L1 层的，任何 RRC 层的错误配置都会在此被精确拦截)*
+```
+
+### 💡 章节硬核总结
+
+**本段协议在数学上完美闭环了 5G 极其复杂的 NR-DC 叠加 Mixed Numerology (R15+R16) 场景下的 PDCCH Overbooking 管理体系。在多维异构的网络拓扑中，算力的分配极易因为缺乏跨节点的实时协调而发生溢出。3GPP 巧妙地采用了“降维打击”的设计思路：通过强制性的 RRC 参数命名空间隔离（`pdcch-BlindDetection3` 锁定 eMBB，`pdcch-BlindDetection2` 锁定 URLLC），将一个复杂的二维矩阵分配问题，拆解成了两个完全正交的一维线性不等式（Linear Inequalities）。终端只需并行执行两套独立的 `UE expects` 校验和即可验证整个系统的调度安全性。这种设计既保障了物理层硬件水池的绝对安全，又最大化地减少了底层状态机的耦合分支逻辑。**
+
+## 📖 协议原文拆解 (四十九)：混搭双基站的“局部偏科大起底” (四维局部上限申报)
+
+> **协议原文**
+> When a UE is configured for NR-DC operation and is provided monitoringCapabilityConfig = r15monitoringcapability for at least one downlink cell and monitoringCapabilityConfig = r16monitoringcapability for at least one downlink cell where the UE monitors PDCCH, the UE may indicate, through pdcch-BlindDetectionMCG-UE1 and pdcch-BlindDetectionSCG-UE1, respective maximum values for pdcch-BlindDetection3 for the MCG and pdcch-BlindDetection3 for the SCG, and through pdcch-BlindDetectionMCG-UE2 and pdcch-BlindDetectionSCG-UE2 respective maximum values for pdcch-BlindDetection2 for the MCG and pdcch-BlindDetection2 for the SCG.
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionMCG-UE1 / SCG-UE1**：常规业务的局部极限。**一句话解释**：手机向基站摊牌：“我的主基站(MCG)模块最多能处理多少常规(R15)任务；辅基站(SCG)模块最多能处理多少常规任务。”注意后缀是 `UE1`，专门用来锁死第 3 代账本（常规配额）。
+* **pdcch-BlindDetectionMCG-UE2 / SCG-UE2**：极速业务的局部极限。**一句话解释**：手机继续摊牌：“我的主基站模块最多能处理多少极速(R16)任务；辅基站模块最多能处理多少极速任务。”后缀是 `UE2`，专门用来锁死第 2 代账本（极速配额）。
+
+### 🚪 第一关：从“双规”到“四防线”的局部底牌
+前几段我们已经非常熟悉手机向基站上报“局部短板/偏科上限”的套路了。
+因为底层硬件可能左右不对称（主基站芯片强，辅基站芯片弱）。
+现在网络环境是**NR-DC双基站 + R15/R16混搭**。这意味着手机不仅要在左右（主辅）上分家，还要在上下（常规极速）上分家。
+因此，手机如果想限制基站瞎派单，它必须一口气向上级提交**四张局部底牌**！
+
+### 🎯 第二关：萝卜拔了坑还在，一一对应不可乱！
+这段协议虽然长，但其核心就是建立一个**严丝合缝的映射字典**：
+* 手机报上去的 `MCG-UE1` 和 `SCG-UE1` ──► 专门用来卡死基站下发的 **`BlindDetection3`**（R15 常规账本）！
+* 手机报上去的 `MCG-UE2` 和 `SCG-UE2` ──► 专门用来卡死基站下发的 **`BlindDetection2`**（R16 极速账本）！
+
+**生活类比**：
+你是外包工厂负责人，手下有主厂区（MCG）和分厂区（SCG），且都能做普件（R15）和急件（R16）。
+你向总局（网络）提交了一份《各厂区各产线产能封顶声明》：
+1. 主厂区普件线（MCG-UE1）：最多 50 单。
+2. 分厂区普件线（SCG-UE1）：最多 30 单。
+3. 主厂区急件线（MCG-UE2）：最多 10 单。
+4. 分厂区急件线（SCG-UE2）：最多 5 单。
+以后总局给你下发指标的时候，这 4 个红线指标，每一个都必须被单独遵守，任何一条产线都不能被强行塞爆。
+
+### 🔄 四维局部能力限制上报全景图
+```text
+【手机底层的 4 块硬件资源池，向外暴露 4 个硬件瓶颈参数】
+
+               [ 常规业务 R15 产线 ]         [ 极速业务 R16 产线 ]
+            ┌───────────────────────┐   ┌───────────────────────┐
+[主基站 MCG] │ 申报名: MCG-UE1       │   │ 申报名: MCG-UE2       │
+            │ 管控目标: BlindDet-3   │   │ 管控目标: BlindDet-2   │
+            ├───────────────────────┤   ├───────────────────────┤
+[辅基站 SCG] │ 申报名: SCG-UE1       │   │ 申报名: SCG-UE2       │
+            │ 管控目标: BlindDet-3   │   │ 管控目标: BlindDet-2   │
+            └───────────────────────┘   └───────────────────────┘
+
+*(基站在下发最终配置前，必须通过这 4 个不等式的严格校验)*
+```
+
+### 💡 章节硬核总结
+
+**本段协议在 RRC 信令空间内，完成了 5G 异构多连接场景下基带瓶颈特征（Hardware Bottleneck Profiling）的高精度三维刻画。在 NR-DC 叠加 Mixed CA 的四象限模型中，如果缺少这四个方向的 Sub-capacity 声明，网络侧将不得不在配额下发时采用最保守的对半均分策略，极大地浪费了终端能力。3GPP 再次通过精密的后缀命名法（Suffix Nomenclature），将 UE 侧上报的瓶颈指示灯（`-UE1` 与 `-UE2`）与网络侧的配置容器（`BlindDetection3` 与 `BlindDetection2`）进行了绝对无歧义的点对点硬连线（Hard-wiring）。这种全参数矩阵暴露的设计，赋予了基站调度算法在主辅节点、快慢信令之间进行极致挤压和动态重平衡的权限，同时确保了 L1 硅片的物理安全底线。**
+
+## 📖 协议原文拆解 (五十)：混搭模式下，R15 常规产线居然允许“拔电源”？(0 值的突破)
+
+> **协议原文**
+> If the UE reports pdcch-BlindDetectionCA1,
+> - the value range of pdcch-BlindDetectionMCG-UE1 or of pdcch-BlindDetectionSCG-UE1 is [0, 1, …, pdcch-BlindDetectionCA1], and
+> - pdcch-BlindDetectionMCG-UE1 + pdcch-BlindDetectionSCG-UE1 >= pdcch-BlindDetectionCA1.
+> Otherwise, if $N_{cells}^{DL,NR-DC,max,r15}$ is a maximum total number of downlink cells for which the UE is provided monitoringCapabilityConfig = r15monitoringcapability and the UE is configured on both the MCG and the SCG for NR-DC as indicated in UE-NR-Capability
+> - the value range of pdcch-BlindDetectionMCG-UE1 or of pdcch-BlindDetectionSCG-UE1 is [0, 1, 2],
+> - pdcch-BlindDetectionMCG-UE1 + pdcch-BlindDetectionSCG-UE1 >= $N_{cells}^{DL,NR-DC,max,r15}$.
+
+### 📚 增量术语表
+* **[0, 1, ..., pdcch-BlindDetectionCA1]**：局部上限的值域范围。**一句话解释**：这是协议读到现在，第一次在能力上报的范围里出现了 **`0`** 和 **`满值 (CA1)`**！以前我们看到的都是 `[1, ..., 总能力-1]`。
+
+### 🚪 第一关：熟悉的“溢出公式”，但不寻常的值域
+先看不变的部分：
+不论手机有没有老老实实填总能力表（`CA1`），局部上限的加法依然必须满足 **`主基站 + 辅基站 >= 总算力`**。这个赋予基站调度弹性的“算力溢出守恒定律”是永远不变的。
+
+**最惊人的变化在于：允许填 `0` 和 `满值`！**
+在前面单独 R15 或是单独 R16 的双连接中，协议规定每个基站最少得留 1 个名额（范围是 `1 到 N-1`），意思是两边都必须得干活。
+但是，在现在的**混搭双连接（R15+R16）的常规业务（-UE1）上报里**，手机居然可以告诉基站：
+* “我的 MCG 常规业务上限是 **满值**！”
+* “我的 SCG 常规业务上限是 **0**！”
+
+### 🎯 第二关：为什么允许“拔掉一边的常规电源”？（物理意义）
+在极其高压的“冰火两重天（R15+R16并存）”环境里，手机的底层硬件压力巨大。
+有些极端的通信场景或硬件设计要求：
+**“好钢必须用在刀刃上！”**
+可能辅基站（SCG）那边全都是极其要命的极速 URLLC 业务（R16），手机为了保住 SCG 那边的极速业务不爆，决定在 SCG 侧**彻底关闭常规业务处理能力**（上报 SCG-UE1 = 0）。
+也就是说，手机允许这样一种极端分工：
+* 主基站（MCG）负责全包所有的普通慢速业务（R15）。
+* 辅基站（SCG）专心致志、心无旁骛地只干极速业务（R16）。
+
+这就叫底层的**“非对称极端专职化分配”**。为了支持这种硬件架构，协议在值域范围里解除了限制，加入了 `0`。
+
+**生活类比**：
+你在跑两家平台（主副业），且都有普通单和加急单。
+以前你跑外卖，平台强制要求你两边都得接普通单，哪怕只有 1 单。
+现在因为加急单实在太急了。你向平台申请了特批：“为了保证副业的加急单绝对不超时，我向副业申请**普通单接单上限为 0**（SCG-UE1=0），副业的普通单我不伺候了！所有普通单的指标，全部压在主业头上（MCG-UE1=满值）！”
+
+### 🔄 混搭模式下常规产线 (R15) 极端能力偏科图
+```text
+【手机的 R15 常规产线向基站申报能力上限】
+
+ 总常规算力 (CA1) = 6
+        │
+        ├─► 过去规矩：MCG 和 SCG 只能在 [1 到 5] 之间分。
+        │
+        └─► 现在规矩 (混搭模式专属特权)：
+               │
+               ├─ 极端方案 A: MCG 报 6 (满值)；SCG 报 0 (拔电源)！
+               │    (满足 6 + 0 >= 6) ✅ 合法！
+               │
+               └─ 极端方案 B: MCG 报 0 (拔电源)；SCG 报 6 (满值)！
+                    (满足 0 + 6 >= 6) ✅ 合法！
+
+*(这种机制使得终端能够在复杂的双连接中，将某一侧的基带流水线彻底清空，完全留给高优的 URLLC 业务)*
+```
+
+### 💡 章节硬核总结
+
+**本段协议在微观参数的值域（Value Range）设定上，展现了 3GPP 对极端异构调度拓扑的深度包容。在处理 Mixed CA + NR-DC 的 eMBB（即 UE1 后缀的 R15 盲检）分支时，协议敏锐地打破了以往 `[1, ..., Capacity-1]` 的均摊强制性，将边界拓展至 `[0, ..., Capacity]`。这一看似微小的数字改动，在物理层架构上撕开了一道关键的口子：它允许终端执行极端的“业务级物理隔离（Service-level Physical Isolation）”。即 UE 可以在某一特定的 Cell Group（例如 SCG）上彻底宣称其 eMBB PDCCH 译码能力为零，从而促使网络侧将该节点的所有基带算力预算无损让渡给同节点的 URLLC（R16）流水线。这是在极限算力盘剥下，保障超低延迟业务 QCL（Quality of Service）的最有效防线。**
+
+## 📖 协议原文拆解 (五十一)：极速产线也允许“断舍离”，但没报底牌就得承受“双重削减” (R16 数值约束)
+
+> **协议原文**
+> If the UE reports pdcch-BlindDetectionCA2
+> - the value range of pdcch-BlindDetectionMCG-UE2 or of pdcch-BlindDetectionSCG-UE2 is [0, 1, …, pdcch-BlindDetectionCA2], and
+> - pdcch-BlindDetectionMCG-UE2 + pdcch-BlindDetectionSCG-UE2 >= pdcch-BlindDetectionCA2.
+> Otherwise, if $N_{cells}^{DL,NR-DC,max,r16}$ is a maximum total number of downlink cells for which the UE is provided monitoringCapabilityConfig = r16monitoringcapability and the UE is configured on both the MCG and the SCG for NR-DC as indicated in UE-NR-Capability
+> - the value range of pdcch-BlindDetectionMCG-UE2 or of pdcch-BlindDetectionSCG-UE2 is [0, 1],
+> - pdcch-BlindDetectionMCG-UE2 + pdcch-BlindDetectionSCG-UE2 >= $N_{cells}^{DL,NR-DC,max,r16}$.
+
+### 📚 增量术语表
+* **pdcch-BlindDetectionCA2**：混搭模式下的极速 (R16) 总能力上限。**一句话解释**：手机上报的在混搭状态下，全网能分给极速业务的总算力配额。
+* **pdcch-BlindDetectionMCG-UE2 / SCG-UE2**：混搭模式下的极速局部能力上限。**一句话解释**：分别分给主基站和辅基站的极速处理能力天花板（带 `-UE2` 后缀）。
+
+### 🚪 第一关：同样允许极速业务单边“清零”
+上一段（五十段）协议规定，在混搭模式下，普通 R15 业务的局部上限可以填 `0`。
+这段协议紧随其后宣布：**极速 R16 业务的局部上限，同样允许填 `0` 或满值 `[0, ..., CA2]`。**
+
+**物理意义**：
+这种对称的设计赋予了手机极端的架构自由度。
+手机完全可以向基站这样报备：
+* MCG-UE1 (主站常规) = 满值； MCG-UE2 (主站极速) = 0
+* SCG-UE1 (辅站常规) = 0； SCG-UE2 (辅站极速) = 满值
+这等于告诉基站：**“我的主芯片只干慢活，我的协处理器只干快活！”** 从而在物理节点上彻底解耦了 eMBB 和 URLLC 的处理流水线。
+
+### 🎯 第二关：如果不报能力，极速产线的“残酷压制”又来了！
+请重点看后半段（Otherwise 分支）。
+如果手机在简历里**没有**专门写上极速专项能力表（CA2），而是让基站按实际连接的频段数（$N_{r16}$）硬算。
+这时候，局部上限的值域变成了：**`[0, 1]`**！
+
+**相比上一段，这个削减非常刺眼**：
+* 上一段（R15 常规产线没报能力）：缺省值域是 `[0, 1, 2]`。
+* 本段（R16 极速产线没报能力）：缺省值域直接被砍到了 `[0, 1]`！
+
+**为什么极速产线如此受“排挤”？**
+这再次印证了我们在第（三十二）段提到的核心原则：**极速 R16 (per span) 对芯片的压榨太狠了！**
+既然你连自己的极限底牌都不敢报，协议就启动最残酷的硬件保护模式。无论你怎么调配，任何一边的基站（哪怕你把另一边清零），最多也只能给你分配 **1个** 当量小区的极速并发任务！绝对不准报 2，从而物理切断极速业务瞬时并发导致基带热熔断的任何可能性。
+
+### 🔄 混搭模式下极速产线 (R16) 的双向钳制图
+```text
+【手机的 R16 极速产线向基站申报能力上限】
+
+        ├─► 有上报总的极速能力 CA2 吗？
+        │
+        ├──► 【有报】
+        │       └─► 范围自由：可以在 [0 到 CA2满值] 之间任意挑。
+        │           (主辅加起来 >= CA2 即可，允许一边满额一边拔电源)
+        │
+        └──► 【没报】
+                └─► 触发双重紧箍咒！
+                    限制 1：可以拔电源填 0，但最高只能填 1！(值域 [0, 1])
+                    限制 2：加起来必须 >= 当前极速物理频段总数 N_r16！
+                    (推论：这意味着在这种缺省状态下，如果 N_r16 为 2，你两边只能各填 1；
+                     如果 N_r16 大于 2，手机根本无法合法上报，基站配置必然报错失败！)
+```
+
+### 💡 章节硬核总结
+
+**本段协议是前述 `r15monitoringcapability` 边界条件在 `r16monitoringcapability` (URLLC per-span) 维度的严格推演。在维持了允许 `0` 值存在（即支持业务级基站物理隔离）的架构弹性的同时，协议在其隐式回退（Fallback）路径中，再次亮出了属于极低延迟业务的“杀手锏”——将局部容量上限强制截断至单调的 `[0, 1]` 空间。这在数学上产生了一个严酷的副产品：如果处于缺省盲区的 UE 被网络侧强行配置了超过 2 个的 URLLC CCs，因为 $0+1 \not\ge 3$ 且 $1+1 \not\ge 3$，UE 将在逻辑上彻底无法寻找到合法的能力上报参数对，从而导致 RRC 重配置的合法性阻断（Rejection）。这是 3GPP 利用参数值域（Value Range）天然属性来实现防故障架构（Failsafe Architecture）的神来之笔。**
+
+## 📖 协议原文拆解 (五十二)：双老板 + 养生局！混搭双连接的“第二套方程式” (R15+R17 混配)
+
+> **协议原文**
+> When a UE is configured for NR-DC operation with a total of $N_{NR-DC}^{DL,cells}$ downlink cells on both the MCG and the SCG and the UE is provided monitoringCapabilityConfig = r15monitoringcapability for $N_{NR-DC,r15}^{DL,cells}$ downlink cells and monitoringCapabilityConfig = r17monitoringcapability for $N_{NR-DC,r17}^{DL,cells}$ downlink cells where the UE monitors PDCCH, the UE expects to be provided pdcch-BlindDetection3 and pdcch-BlindDetection4 for the MCG, and pdcch-BlindDetection3 and pdcch-BlindDetection4 for the SCG with values that satisfy
+> - pdcch-BlindDetection3 for the MCG + pdcch-BlindDetection3 for the SCG <= pdcch-BlindDetectionCA1, if the UE reports pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList1, or
+> - pdcch-BlindDetection3 for the MCG + pdcch-BlindDetection3 for the SCG <= $N_{NR-DC,r15}^{DL,cells}$, if the UE does not report pdcch-BlindDetectionCA1 in pdcch-BlindDetectionMixedList1
+> and
+> - pdcch-BlindDetection4 for the MCG + pdcch-BlindDetection4 for the SCG <= pdcch-BlindDetectionCA2, if the UE reports pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList1, or
+> - pdcch-BlindDetection4 for the MCG + pdcch-BlindDetection4 for the SCG <= $N_{NR-DC,r17}^{DL,cells}$, if the UE does not report pdcch-BlindDetectionCA2 in pdcch-BlindDetectionMixedList1
+
+### 📚 增量术语表
+* **NR-DC + Mixed CA (R15 + R17)**：双连接叠加常规与极高频/养生模式混搭。**一句话解释**：这是协议在穷举各种组合。之前拆的是 R15+R16，这里拆的是 R15+R17。
+* **pdcch-BlindDetection3**：混搭模式下常规 R15 业务的 3 号切分账本。
+* **pdcch-BlindDetection4**：混搭模式下佛系 R17 业务的 4 号切分账本。
+* **pdcch-BlindDetectionMixedList1**：专门为 R15+R17 混搭准备的套餐列表（里面包含配对的 CA1 和 CA2）。
+
+### 🚪 第一关：换汤不换药的“算力守恒”
+这又是一段堪称“克隆代码”的协议条文。
+由于网络环境变成了 **“主辅双基站” + “常规业务与按周结长线业务（R15+R17）混搭”**。
+基站在派发配额时，必须动用与之严格对应的两本分离的账册：
+* 用 **3 号账本** (`pdcch-BlindDetection3`) 独立分发和约束 R15 业务。
+* 用 **4 号账本** (`pdcch-BlindDetection4`) 独立分发和约束 R17 业务。
+
+手机依然是高举 `UE expects` 大旗，左右开弓，对两本账册进行双线合规性审计。
+
+### 🎯 第二关：双线审计的具体红线
+审计逻辑和之前毫无二致：
+
+**常规产线 (R15, 3号账本)**：
+主辅基站的 3 号配额之和，**绝不允许**超过手机提交的混合套餐单（`MixedList1`）里的 **CA1 预算**。如果没交菜单，绝不允许超过当前实际接入的 R15 频段总数（$N_{r15}$）。
+
+**养生/极高频产线 (R17, 4号账本)**：
+主辅基站的 4 号配额之和，**绝不允许**超过手机提交的混合套餐单里的 **CA2 预算**。如果没交菜单，绝不允许超过当前实际接入的 R17 频段总数（$N_{r17}$）。
+
+*(注：此处 3GPP 行文的 `CA2` 依然属于下标命名惯性，其实质指向的是 R17 业务在 `MixedList1` 组合中的天花板值，在上一段解读中曾出现过称之为 `CA3` 的笔误/变体，但此处理顺了逻辑闭环。)*
+
+### 🔄 R15 + R17 双连接混搭过载防御公式图解
+```text
+【基站下发 R15 + R17 双业务、双节点混合配额】
+
+[检查站 1：常规 R15 业务]
+ (主 MCG-3) + (辅 SCG-3) <= 阈值 Limit_R15
+  │
+  └─ Limit_R15 的取值：
+     有套餐时 = 套餐里的 CA1 (R15预算)
+     没套餐时 = 实际 R15 频段个数
+
+[检查站 2：养生 R17 业务]
+ (主 MCG-4) + (辅 SCG-4) <= 阈值 Limit_R17
+  │
+  └─ Limit_R17 的取值：
+     有套餐时 = 套餐里的 CA2 (R17预算)
+     没套餐时 = 实际 R17 频段个数
+
+*(两道算力防火墙平行运转，任何一道拦截失败都会导致底层拒收相关配置)*
+```
+
+### 💡 章节硬核总结
+
+**本段协议在数学骨架上完美重用了 R15+R16 的分配逻辑（第四十八段），但将其定界参数精准替换为面向 R15+R17 组合态的专属 IE 集合。这是 3GPP "正交扩展（Orthogonal Extension）" 设计范式的典型应用：在拓扑逻辑完全解耦的前提下，只要更换参数字典中的后缀名（如 `BlindDetection4` 取代 `BlindDetection2`，`MixedList1` 取代单独的能力上报），即可支撑全新的业务物理模型。此处的守恒方程确保了在引入 `per group of Xs slots` 的拉伸时域盲检架构时，NR-DC 节点间的资源切割能够得到强制的 RRC 级数学约束，将基带死锁防范逻辑以最小的协议开销前置到了基站配置合法性检验阶段。**
+
